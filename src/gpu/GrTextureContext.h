@@ -47,10 +47,6 @@ private:
     friend class GrDrawingManager; // for ctor
 
     bool onCopy(GrSurfaceProxy* src, const SkIRect& srcRect, const SkIPoint& dstPoint) override;
-    bool onReadPixels(const SkImageInfo& dstInfo, void* dstBuffer,
-                      size_t dstRowBytes, int x, int y, uint32_t flags) override;
-    bool onWritePixels(const SkImageInfo& srcInfo, const void* srcBuffer,
-                       size_t srcRowBytes, int x, int y, uint32_t flags) override;
 
     GrTextureOpList* getOpList();
 
@@ -58,7 +54,7 @@ private:
 
     // In MDB-mode the GrOpList can be closed by some other renderTargetContext that has picked
     // it up. For this reason, the GrOpList should only ever be accessed via 'getOpList'.
-    GrTextureOpList*             fOpList;
+    sk_sp<GrTextureOpList>       fOpList;
 
     typedef GrSurfaceContext INHERITED;
 };

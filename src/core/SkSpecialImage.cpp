@@ -17,6 +17,7 @@
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
+#include "GrContextPriv.h"
 #include "GrResourceProvider.h"
 #include "GrSurfaceContext.h"
 #include "GrSurfaceProxyPriv.h"
@@ -217,11 +218,6 @@ public:
         , fBitmap(bm)
     {
         SkASSERT(bm.pixelRef());
-
-        // We have to lock now, while bm is still in scope, since it may have come from our
-        // cache, which means we need to keep it locked until we (the special) are done, since
-        // we cannot re-generate the cache entry (if bm came from a generator).
-        fBitmap.lockPixels();
         SkASSERT(fBitmap.getPixels());
     }
 
@@ -331,13 +327,15 @@ sk_sp<SkSpecialImage> SkSpecialImage::MakeFromRaster(const SkIRect& subset,
     }
 
     const SkBitmap* srcBM = &bm;
-    SkBitmap tmpStorage;
+    SkBitmap tmp;
     // ImageFilters only handle N32 at the moment, so force our src to be that
     if (!valid_for_imagefilters(bm.info())) {
-        if (!bm.copyTo(&tmpStorage, kN32_SkColorType)) {
+        if (!tmp.tryAllocPixels(bm.info().makeColorType(kN32_SkColorType)) ||
+            !bm.readPixels(tmp.info(), tmp.getPixels(), tmp.rowBytes(), 0, 0))
+        {
             return nullptr;
         }
-        srcBM = &tmpStorage;
+        srcBM = &tmp;
     }
     return sk_make_sp<SkSpecialImage_Raster>(subset, *srcBM, props);
 }
@@ -409,26 +407,25 @@ public:
             return true;
         }
 
+        SkPixmap pmap;
         SkImageInfo info = SkImageInfo::MakeN32(this->width(), this->height(),
                                                 this->alphaType(), fColorSpace);
-
-        if (!dst->tryAllocPixels(info)) {
+        auto rec = SkBitmapCache::Alloc(desc, info, &pmap);
+        if (!rec) {
             return false;
         }
 
-        // Reading back to an SkBitmap ends deferral
-        GrTexture* texture = fTextureProxy->instantiate(fContext->resourceProvider());
-        if (!texture) {
+        sk_sp<GrSurfaceContext> sContext = fContext->contextPriv().makeWrappedSurfaceContext(
+                                                                          fTextureProxy, nullptr);
+        if (!sContext) {
             return false;
         }
 
-        if (!texture->readPixels(0, 0, dst->width(), dst->height(), kSkia8888_GrPixelConfig,
-                                 dst->getPixels(), dst->rowBytes())) {
+        if (!sContext->readPixels(info, pmap.writable_addr(), pmap.rowBytes(), 0, 0)) {
             return false;
         }
 
-        dst->pixelRef()->setImmutableWithID(this->uniqueID());
-        SkBitmapCache::Add(desc, *dst);
+        SkBitmapCache::Add(std::move(rec), dst);
         fAddedRasterVersionToCache.store(true);
         return true;
     }

@@ -6,7 +6,7 @@
  */
 
 #include "SkColorFilter.h"
-#include "../../src/core/SkReadBuffer.h"
+#include "SkFlattenable.h"
 
 #ifndef SkOverdrawColorFilter_DEFINED
 #define SkOverdrawColorFilter_DEFINED
@@ -45,6 +45,8 @@ private:
     SkOverdrawColorFilter(const SkPMColor colors[kNumColors]) {
         memcpy(fColors, colors, kNumColors * sizeof(SkPMColor));
     }
+
+    void onAppendStages(SkRasterPipeline*, SkColorSpace*, SkArenaAlloc*, bool) const override;
 
     SkPMColor fColors[kNumColors];
 

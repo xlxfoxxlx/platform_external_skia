@@ -9,6 +9,7 @@
 
 #include "GrCoordTransform.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
+#include "glsl/GrGLSLProgramBuilder.h"
 #include "glsl/GrGLSLUniformHandler.h"
 #include "glsl/GrGLSLVertexShaderBuilder.h"
 
@@ -17,8 +18,8 @@ SkMatrix GrGLSLPrimitiveProcessor::GetTransformMatrix(const SkMatrix& localMatri
     SkMatrix combined;
     combined.setConcat(coordTransform.getMatrix(), localMatrix);
     if (coordTransform.normalize()) {
-        SkASSERT(coordTransform.texture());
-        combined.postIDiv(coordTransform.texture()->width(), coordTransform.texture()->height());
+        combined.postIDiv(coordTransform.peekTexture()->width(),
+                          coordTransform.peekTexture()->height());
     }
 
     if (coordTransform.reverseY()) {
@@ -46,6 +47,9 @@ void GrGLSLPrimitiveProcessor::setupUniformColor(GrGLSLPPFragmentBuilder* fragBu
                                                "Color",
                                                &stagedLocalVarName);
     fragBuilder->codeAppendf("%s = %s;", outputName, stagedLocalVarName);
+    if (fragBuilder->getProgramBuilder()->shaderCaps()->mustObfuscateUniformColor()) {
+        fragBuilder->codeAppendf("%s = max(%s, vec4(0, 0, 0, 0));", outputName, outputName);
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////

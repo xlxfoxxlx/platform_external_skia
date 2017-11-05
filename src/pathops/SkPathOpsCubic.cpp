@@ -248,29 +248,29 @@ int SkDCubic::ComplexBreak(const SkPoint pointsPtr[4], SkScalar* t) {
     if (cubic.monotonicInX() && cubic.monotonicInY()) {
         return 0;
     }
-    SkScalar d[3];
+    SkScalar d[4];
     SkCubicType cubicType = SkClassifyCubic(pointsPtr, d);
     switch (cubicType) {
-        case kLoop_SkCubicType: {
+        case SkCubicType::kLoop: {
             // crib code from gpu path utils that finds t values where loop self-intersects
             // use it to find mid of t values which should be a friendly place to chop
-            SkScalar tempSqrt = SkScalarSqrt(4.f * d[0] * d[2] - 3.f * d[1] * d[1]);
-            SkScalar ls = d[1] - tempSqrt;
-            SkScalar lt = 2.f * d[0];
-            SkScalar ms = d[1] + tempSqrt;
-            SkScalar mt = 2.f * d[0];
-            if (roughly_between(0, ls, lt) && roughly_between(0, ms, mt)) {
-                ls = ls / lt;
-                ms = ms / mt;
-                SkASSERT(roughly_between(0, ls, 1) && roughly_between(0, ms, 1));
-                t[0] = (ls + ms) / 2;
+            SkASSERT(d[0] < 0);
+            const SkScalar q = d[2] + SkScalarCopySign(SkScalarSqrt(-d[0]), d[2]);
+            const SkScalar td = q;
+            const SkScalar sd = 2 * d[1];
+            const SkScalar te = 2 * (d[2] * d[2] - d[3] * d[1]);
+            const SkScalar se = d[1] * q;
+            if (roughly_between(0, td, sd) && roughly_between(0, te, se)) {
+                SkASSERT(roughly_between(0, td / sd, 1) && roughly_between(0, te / se, 1));
+                t[0] = (td * se + te * sd) / (2 * sd * se);
                 SkASSERT(roughly_between(0, *t, 1));
                 return (int) (t[0] > 0 && t[0] < 1);
             }
         }
         // fall through if no t value found
-        case kSerpentine_SkCubicType:
-        case kCusp_SkCubicType: {
+        case SkCubicType::kSerpentine:
+        case SkCubicType::kLocalCusp:
+        case SkCubicType::kInfiniteCusp: {
             double inflectionTs[2];
             int infTCount = cubic.findInflections(inflectionTs);
             double maxCurvature[3];

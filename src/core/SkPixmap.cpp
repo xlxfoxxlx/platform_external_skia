@@ -20,16 +20,6 @@
 #include "SkSurface.h"
 #include "SkUtils.h"
 
-void SkAutoPixmapUnlock::reset(const SkPixmap& pm, void (*unlock)(void*), void* ctx) {
-    SkASSERT(pm.addr() != nullptr);
-
-    this->unlock();
-    fPixmap = pm;
-    fUnlockProc = unlock;
-    fUnlockContext = ctx;
-    fIsLocked = true;
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 void SkPixmap::reset() {
@@ -84,8 +74,8 @@ bool SkPixmap::extractSubset(SkPixmap* result, const SkIRect& subset) const {
     return true;
 }
 
-bool SkPixmap::readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRB, int x, int y)
-const {
+bool SkPixmap::readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRB, int x, int y,
+                          SkTransferFunctionBehavior behavior) const {
     if (!SkImageInfoValidConversion(dstInfo, fInfo)) {
         return false;
     }
@@ -98,7 +88,7 @@ const {
     const void* srcPixels = this->addr(rec.fX, rec.fY);
     const SkImageInfo srcInfo = fInfo.makeWH(rec.fInfo.width(), rec.fInfo.height());
     SkConvertPixels(rec.fInfo, rec.fPixels, rec.fRowBytes, srcInfo, srcPixels, this->rowBytes(),
-                    this->ctable(), SkTransferFunctionBehavior::kRespect);
+                    this->ctable(), behavior);
     return true;
 }
 

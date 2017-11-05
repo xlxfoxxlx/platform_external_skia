@@ -34,6 +34,7 @@ tool_shared_libs = [
     'libdng_sdk',
     'libpiex',
     'libcutils',
+    'libnativewindow',
 ]
 
 # The ordering here is important: libsfntly needs to come after libskia.
@@ -132,6 +133,7 @@ cc_library {
         "libvulkan",
         "libz",
         "libcutils",
+        "libnativewindow",
     ],
     static_libs: [
         "libarect",
@@ -192,7 +194,6 @@ cc_test {
 # We'll run GN to get the main source lists and include directories for Skia.
 gn_args = {
   'is_official_build':  'true',
-  'skia_enable_jumper': 'true',
   'skia_enable_tools':  'true',
   'skia_use_vulkan':    'true',
   'target_cpu':         '"none"',
@@ -273,7 +274,6 @@ defines.extend([
   'SK_BUILD_FOR_ANDROID_FRAMEWORK',
   'SK_DEFAULT_FONT_CACHE_LIMIT   (768 * 1024)',
   'SK_DEFAULT_GLOBAL_DISCARDABLE_MEMORY_POOL_SIZE (512 * 1024)',
-  'SK_IGNORE_ETC1_SUPPORT',
   'SK_USE_FREETYPE_EMBOLDEN',
 ])
 # TODO: move these all to android_framework_defines.gni?

@@ -22,7 +22,6 @@
 #include "SkDraw.h"
 #include "SkGlyphCache.h"
 #include "SkGr.h"
-#include "SkImageCacherator.h"
 #include "SkImageFilter.h"
 #include "SkImageFilterCache.h"
 #include "SkImageInfoPriv.h"
@@ -48,6 +47,7 @@
 #include "effects/GrBicubicEffect.h"
 #include "effects/GrSimpleTextureEffect.h"
 #include "effects/GrTextureDomain.h"
+#include "../private/SkShadowFlags.h"
 #include "text/GrTextUtils.h"
 
 #if SK_SUPPORT_GPU
@@ -168,7 +168,8 @@ sk_sp<GrRenderTargetContext> SkGpuDevice::MakeRenderTargetContext(
     GrPixelConfig config = SkImageInfo2GrPixelConfig(origInfo, *context->caps());
     // This method is used to create SkGpuDevice's for SkSurface_Gpus. In this case
     // they need to be exact.
-    return context->makeRenderTargetContext(SkBackingFit::kExact,
+    return context->makeDeferredRenderTargetContext(
+                                    SkBackingFit::kExact,
                                     origInfo.width(), origInfo.height(),
                                     config, origInfo.refColorSpace(), sampleCount,
                                     origin, surfaceProps, budgeted);
@@ -388,16 +389,12 @@ void SkGpuDevice::drawPoints(SkCanvas::PointMode mode,
         return;
     }
 
-    fRenderTargetContext->drawVertices(this->clip(),
-                                       std::move(grPaint),
-                                       *viewMatrix,
-                                       primitiveType,
-                                       SkToS32(count),
-                                       (SkPoint*)pts,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       0);
+    static constexpr SkVertices::VertexMode kIgnoredMode = SkVertices::kTriangles_VertexMode;
+    sk_sp<SkVertices> vertices = SkVertices::MakeCopy(kIgnoredMode, SkToS32(count), pts, nullptr,
+                                                      nullptr);
+
+    fRenderTargetContext->drawVertices(this->clip(), std::move(grPaint), *viewMatrix,
+                                       std::move(vertices), &primitiveType);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -862,9 +859,8 @@ void SkGpuDevice::drawBitmap(const SkBitmap& bitmap,
 
     // The tile code path doesn't currently support AA, so if the paint asked for aa and we could
     // draw untiled, then we bypass checking for tiling purely for optimization reasons.
-    bool drawAA = !fRenderTargetContext->isUnifiedMultisampled() &&
-                  paint.isAntiAlias() &&
-                  bitmap.width() <= maxTileSize &&
+    bool drawAA = GrFSAAType::kUnifiedMSAA != fRenderTargetContext->fsaaType() &&
+                  paint.isAntiAlias() && bitmap.width() <= maxTileSize &&
                   bitmap.height() <= maxTileSize;
 
     bool skipTileCheck = drawAA || paint.getMaskFilter();
@@ -957,15 +953,9 @@ void SkGpuDevice::drawTiledBitmap(const SkBitmap& bitmap,
     SK_HISTOGRAM_BOOLEAN("DrawTiled", true);
     LogDrawScaleFactor(viewMatrix, origPaint.getFilterQuality());
 
-    // The following pixel lock is technically redundant, but it is desirable
-    // to lock outside of the tile loop to prevent redecoding the whole image
-    // at each tile in cases where 'bitmap' holds an SkDiscardablePixelRef that
-    // is larger than the limit of the discardable memory pool.
-    SkAutoLockPixels alp(bitmap);
-
     const SkPaint* paint = &origPaint;
     SkPaint tempPaint;
-    if (origPaint.isAntiAlias() && !fRenderTargetContext->isUnifiedMultisampled()) {
+    if (origPaint.isAntiAlias() && GrFSAAType::kUnifiedMSAA != fRenderTargetContext->fsaaType()) {
         // Drop antialiasing to avoid seams at tile boundaries.
         tempPaint = origPaint;
         tempPaint.setAntiAlias(false);
@@ -1112,7 +1102,7 @@ void SkGpuDevice::drawBitmapTile(const SkBitmap& bitmap,
 
     // Coverage-based AA would cause seams between tiles.
     GrAA aa = GrBoolToAA(paint.isAntiAlias() &&
-                         fRenderTargetContext->isStencilBufferMultisampled());
+                         GrFSAAType::kNone != fRenderTargetContext->fsaaType());
     fRenderTargetContext->drawRect(this->clip(), std::move(grPaint), aa, viewMatrix, dstRect);
 }
 
@@ -1131,16 +1121,17 @@ void SkGpuDevice::drawSprite(const SkBitmap& bitmap,
         return;
     }
 
-    this->drawSpecial(srcImg.get(), left, top, paint);
+    this->drawSpecial(srcImg.get(), left, top, paint, nullptr, SkMatrix::I());
 }
 
 
-void SkGpuDevice::drawSpecial(SkSpecialImage* special1,
-                              int left, int top,
-                              const SkPaint& paint) {
+void SkGpuDevice::drawSpecial(SkSpecialImage* special1, int left, int top, const SkPaint& paint,
+                              SkImage* clipImage,const SkMatrix& clipMatrix) {
     ASSERT_SINGLE_OWNER
     CHECK_SHOULD_DRAW();
     GR_CREATE_TRACE_MARKER_CONTEXT("SkGpuDevice", "drawSpecial", fContext.get());
+
+    // TODO: clipImage support.
 
     SkIPoint offset = { 0, 0 };
 
@@ -1236,12 +1227,11 @@ void SkGpuDevice::drawBitmapRect(const SkBitmap& bitmap,
 
     // The tile code path doesn't currently support AA, so if the paint asked for aa and we could
     // draw untiled, then we bypass checking for tiling purely for optimization reasons.
-    bool drawAA = !fRenderTargetContext->isUnifiedMultisampled() &&
-        paint.isAntiAlias() &&
-        bitmap.width() <= maxTileSize &&
-        bitmap.height() <= maxTileSize;
+    bool useCoverageAA = GrFSAAType::kUnifiedMSAA != fRenderTargetContext->fsaaType() &&
+                         paint.isAntiAlias() && bitmap.width() <= maxTileSize &&
+                         bitmap.height() <= maxTileSize;
 
-    bool skipTileCheck = drawAA || paint.getMaskFilter();
+    bool skipTileCheck = useCoverageAA || paint.getMaskFilter();
 
     if (!skipTileCheck) {
         int tileSize;
@@ -1335,7 +1325,6 @@ sk_sp<SkSpecialImage> SkGpuDevice::snapSpecial() {
     const SkImageInfo ii = this->imageInfo();
     const SkIRect srcRect = SkIRect::MakeWH(ii.width(), ii.height());
 
-    SkASSERT(proxy->priv().isExact());
     return SkSpecialImage::MakeDeferredFromGpu(fContext.get(),
                                                srcRect,
                                                kNeedNewImageUniqueID_SpecialImage,
@@ -1361,7 +1350,7 @@ void SkGpuDevice::drawDevice(SkBaseDevice* device,
         return;
     }
 
-    this->drawSpecial(srcImg.get(), left, top, paint);
+    this->drawSpecial(srcImg.get(), left, top, paint, nullptr, SkMatrix::I());
 }
 
 void SkGpuDevice::drawImage(const SkImage* image, SkScalar x, SkScalar y,
@@ -1388,9 +1377,9 @@ void SkGpuDevice::drawImage(const SkImage* image, SkScalar x, SkScalar y,
                 return;
             }
             this->drawBitmap(bm, SkMatrix::MakeTrans(x, y), paint);
-        } else if (SkImageCacherator* cacher = as_IB(image)->peekCacherator()) {
+        } else if (image->isLazyGenerated()) {
             CHECK_SHOULD_DRAW();
-            GrImageTextureMaker maker(fContext.get(), cacher, image, SkImage::kAllow_CachingHint);
+            GrImageTextureMaker maker(fContext.get(), image, SkImage::kAllow_CachingHint);
             this->drawTextureProducer(&maker, nullptr, nullptr, SkCanvas::kFast_SrcRectConstraint,
                                       viewMatrix, this->clip(), paint);
         } else if (as_IB(image)->getROPixels(&bm, fRenderTargetContext->getColorSpace())) {
@@ -1424,9 +1413,9 @@ void SkGpuDevice::drawImageRect(const SkImage* image, const SkRect* src,
             return;
         }
         this->drawBitmapRect(bm, src, dst, paint, constraint);
-    } else if (SkImageCacherator* cacher = as_IB(image)->peekCacherator()) {
+    } else if (image->isLazyGenerated()) {
         CHECK_SHOULD_DRAW();
-        GrImageTextureMaker maker(fContext.get(), cacher, image, SkImage::kAllow_CachingHint);
+        GrImageTextureMaker maker(fContext.get(), image, SkImage::kAllow_CachingHint);
         this->drawTextureProducer(&maker, src, &dst, constraint, this->ctm(), this->clip(), paint);
     } else if (as_IB(image)->getROPixels(&bm, fRenderTargetContext->getColorSpace())) {
         this->drawBitmapRect(bm, src, dst, paint, constraint);
@@ -1440,7 +1429,7 @@ void SkGpuDevice::drawProducerNine(GrTextureProducer* producer,
     CHECK_SHOULD_DRAW();
 
     bool useFallback = paint.getMaskFilter() || paint.isAntiAlias() ||
-                       fRenderTargetContext->isUnifiedMultisampled();
+                       GrFSAAType::kUnifiedMSAA == fRenderTargetContext->fsaaType();
     bool doBicubic;
     GrSamplerParams::FilterMode textureFilterMode =
         GrSkFilterQualityToGrFilterMode(paint.getFilterQuality(), this->ctm(), SkMatrix::I(),
@@ -1488,8 +1477,8 @@ void SkGpuDevice::drawImageNine(const SkImage* image,
         this->drawProducerNine(&adjuster, center, dst, paint);
     } else {
         SkBitmap bm;
-        if (SkImageCacherator* cacher = as_IB(image)->peekCacherator()) {
-            GrImageTextureMaker maker(fContext.get(), cacher, image, SkImage::kAllow_CachingHint);
+        if (image->isLazyGenerated()) {
+            GrImageTextureMaker maker(fContext.get(), image, SkImage::kAllow_CachingHint);
             this->drawProducerNine(&maker, center, dst, paint);
         } else if (as_IB(image)->getROPixels(&bm, fRenderTargetContext->getColorSpace())) {
             this->drawBitmapNine(bm, center, dst, paint);
@@ -1544,8 +1533,8 @@ void SkGpuDevice::drawImageLattice(const SkImage* image,
         this->drawProducerLattice(&adjuster, lattice, dst, paint);
     } else {
         SkBitmap bm;
-        if (SkImageCacherator* cacher = as_IB(image)->peekCacherator()) {
-            GrImageTextureMaker maker(fContext.get(), cacher, image, SkImage::kAllow_CachingHint);
+        if (image->isLazyGenerated()) {
+            GrImageTextureMaker maker(fContext.get(), image, SkImage::kAllow_CachingHint);
             this->drawProducerLattice(&maker, lattice, dst, paint);
         } else if (as_IB(image)->getROPixels(&bm, fRenderTargetContext->getColorSpace())) {
             this->drawBitmapLattice(bm, lattice, dst, paint);
@@ -1568,8 +1557,7 @@ static bool init_vertices_paint(GrContext* context, GrRenderTargetContext* rtc,
     if (hasTexs && skPaint.getShader()) {
         if (hasColors) {
             // When there are texs and colors the shader and colors are combined using bmode.
-            return SkPaintToGrPaintWithXfermode(context, rtc, skPaint, matrix, bmode, false,
-                                                grPaint);
+            return SkPaintToGrPaintWithXfermode(context, rtc, skPaint, matrix, bmode, grPaint);
         } else {
             // We have a shader, but no colors to blend it against.
             return SkPaintToGrPaint(context, rtc, skPaint, matrix, grPaint);
@@ -1581,12 +1569,12 @@ static bool init_vertices_paint(GrContext* context, GrRenderTargetContext* rtc,
             return SkPaintToGrPaintWithPrimitiveColor(context, rtc, skPaint, grPaint);
         } else {
             // No colors and no shaders. Just draw with the paint color.
-            return (!SkPaintToGrPaintNoShader(context, rtc, skPaint, grPaint));
+            return SkPaintToGrPaintNoShader(context, rtc, skPaint, grPaint);
         }
     }
 }
 
-void SkGpuDevice::wireframeVertices(SkCanvas::VertexMode vmode, int vertexCount,
+void SkGpuDevice::wireframeVertices(SkVertices::VertexMode vmode, int vertexCount,
                                     const SkPoint vertices[], SkBlendMode bmode,
                                     const uint16_t indices[], int indexCount,
                                     const SkPaint& paint) {
@@ -1607,11 +1595,11 @@ void SkGpuDevice::wireframeVertices(SkCanvas::VertexMode vmode, int vertexCount,
     int triangleCount = 0;
     int n = (nullptr == indices) ? vertexCount : indexCount;
     switch (vmode) {
-        case SkCanvas::kTriangles_VertexMode:
+        case SkVertices::kTriangles_VertexMode:
             triangleCount = n / 3;
             break;
-        case SkCanvas::kTriangleStrip_VertexMode:
-        case SkCanvas::kTriangleFan_VertexMode:
+        case SkVertices::kTriangleStrip_VertexMode:
+        case SkVertices::kTriangleFan_VertexMode:
             triangleCount = n - 2;
             break;
     }
@@ -1622,7 +1610,11 @@ void SkGpuDevice::wireframeVertices(SkCanvas::VertexMode vmode, int vertexCount,
     //number of indices for lines per triangle with kLines
     indexCount = triangleCount * 6;
 
-    std::unique_ptr<uint16_t[]> lineIndices(new uint16_t[indexCount]);
+    static constexpr SkVertices::VertexMode kIgnoredMode = SkVertices::kTriangles_VertexMode;
+    SkVertices::Builder builder(kIgnoredMode, vertexCount, indexCount, 0);
+    memcpy(builder.positions(), vertices, vertexCount * sizeof(SkPoint));
+
+    uint16_t* lineIndices = builder.indices();
     int i = 0;
     while (vertProc(&state)) {
         lineIndices[i]     = state.f0;
@@ -1633,20 +1625,16 @@ void SkGpuDevice::wireframeVertices(SkCanvas::VertexMode vmode, int vertexCount,
         lineIndices[i + 5] = state.f0;
         i += 6;
     }
+
+    GrPrimitiveType primitiveType = kLines_GrPrimitiveType;
     fRenderTargetContext->drawVertices(this->clip(),
                                        std::move(grPaint),
                                        this->ctm(),
-                                       kLines_GrPrimitiveType,
-                                       vertexCount,
-                                       vertices,
-                                       nullptr,
-                                       nullptr,
-                                       lineIndices.get(),
-                                       indexCount);
+                                       builder.detach(),
+                                       &primitiveType);
 }
 
-void SkGpuDevice::drawVertices(const SkVertices* vertices, SkBlendMode mode,
-                                     const SkPaint& paint) {
+void SkGpuDevice::drawVertices(const SkVertices* vertices, SkBlendMode mode, const SkPaint& paint) {
     ASSERT_SINGLE_OWNER
     CHECK_SHOULD_DRAW();
     GR_CREATE_TRACE_MARKER_CONTEXT("SkGpuDevice", "drawVertices", fContext.get());
@@ -1655,10 +1643,11 @@ void SkGpuDevice::drawVertices(const SkVertices* vertices, SkBlendMode mode,
     GrPaint grPaint;
     bool hasColors = vertices->hasColors();
     bool hasTexs = vertices->hasTexCoords();
-    if (!hasTexs && !hasColors) {
+    if ((!hasTexs || !paint.getShader()) && !hasColors) {
         // The dreaded wireframe mode. Fallback to drawVertices and go so slooooooow.
         this->wireframeVertices(vertices->mode(), vertices->vertexCount(), vertices->positions(),
                                 mode, vertices->indices(), vertices->indexCount(), paint);
+        return;
     }
     if (!init_vertices_paint(fContext.get(), fRenderTargetContext.get(), paint, this->ctm(),
                              mode, hasTexs, hasColors, &grPaint)) {
@@ -1666,6 +1655,29 @@ void SkGpuDevice::drawVertices(const SkVertices* vertices, SkBlendMode mode,
     }
     fRenderTargetContext->drawVertices(this->clip(), std::move(grPaint), this->ctm(),
                                        sk_ref_sp(const_cast<SkVertices*>(vertices)));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void SkGpuDevice::drawShadow(const SkPath& path, const SkDrawShadowRec& rec) {
+
+    ASSERT_SINGLE_OWNER
+    CHECK_SHOULD_DRAW();
+    GR_CREATE_TRACE_MARKER_CONTEXT("SkGpuDevice", "drawShadow", fContext.get());
+
+    SkPaint p;
+    p.setColor(rec.fColor);
+    GrPaint grPaint;
+    if (!SkPaintToGrPaint(this->context(), fRenderTargetContext.get(), p, this->ctm(),
+                          &grPaint)) {
+        return;
+    }
+
+    if (!fRenderTargetContext->drawFastShadow(this->clip(), std::move(grPaint),
+                                              this->ctm(), path, rec)) {
+        // failed to find an accelerated case
+        this->INHERITED::drawShadow(path, rec);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1683,12 +1695,12 @@ void SkGpuDevice::drawAtlas(const SkImage* atlas, const SkRSXform xform[],
     GR_CREATE_TRACE_MARKER_CONTEXT("SkGpuDevice", "drawText", fContext.get());
 
     SkPaint p(paint);
-    p.setShader(atlas->makeShader(SkShader::kClamp_TileMode, SkShader::kClamp_TileMode));
+    p.setShader(atlas->makeShader());
 
     GrPaint grPaint;
     if (colors) {
         if (!SkPaintToGrPaintWithXfermode(this->context(), fRenderTargetContext.get(), p,
-                                          this->ctm(), (SkBlendMode)mode, true, &grPaint)) {
+                                          this->ctm(), (SkBlendMode)mode, &grPaint)) {
             return;
         }
     } else {
@@ -1766,13 +1778,13 @@ SkBaseDevice* SkGpuDevice::onCreateDevice(const CreateInfo& cinfo, const SkPaint
     SkBackingFit fit = kNever_TileUsage == cinfo.fTileUsage ? SkBackingFit::kApprox
                                                             : SkBackingFit::kExact;
 
-    sk_sp<GrRenderTargetContext> rtc(fContext->makeRenderTargetContext(
+    sk_sp<GrRenderTargetContext> rtc(fContext->makeDeferredRenderTargetContext(
                                                    fit,
                                                    cinfo.fInfo.width(), cinfo.fInfo.height(),
-                                                   fRenderTargetContext->config(), 
-                                                   fRenderTargetContext->refColorSpace(), 
-                                                   fRenderTargetContext->desc().fSampleCnt, 
-                                                   kDefault_GrSurfaceOrigin,
+                                                   fRenderTargetContext->config(),
+                                                   fRenderTargetContext->refColorSpace(),
+                                                   fRenderTargetContext->numStencilSamples(),
+                                                   kBottomLeft_GrSurfaceOrigin,
                                                    &props));
     if (!rtc) {
         return nullptr;
@@ -1790,7 +1802,7 @@ sk_sp<SkSurface> SkGpuDevice::makeSurface(const SkImageInfo& info, const SkSurfa
     // TODO: Change the signature of newSurface to take a budgeted parameter.
     static const SkBudgeted kBudgeted = SkBudgeted::kNo;
     return SkSurface::MakeRenderTarget(fContext.get(), kBudgeted, info,
-                                       fRenderTargetContext->desc().fSampleCnt,
+                                       fRenderTargetContext->numStencilSamples(),
                                        fRenderTargetContext->origin(), &props);
 }
 

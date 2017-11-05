@@ -6,7 +6,7 @@
  */
 
 #include "SkLumaColorFilter.h"
-
+#include "SkPM4f.h"
 #include "SkColorPriv.h"
 #include "SkRasterPipeline.h"
 #include "SkString.h"
@@ -17,8 +17,7 @@
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #endif
 
-void SkLumaColorFilter::filterSpan(const SkPMColor src[], int count,
-                                   SkPMColor dst[]) const {
+void SkLumaColorFilter::filterSpan(const SkPMColor src[], int count, SkPMColor dst[]) const {
     for (int i = 0; i < count; ++i) {
         SkPMColor c = src[i];
 
@@ -37,12 +36,11 @@ void SkLumaColorFilter::filterSpan(const SkPMColor src[], int count,
     }
 }
 
-bool SkLumaColorFilter::onAppendStages(SkRasterPipeline* p,
+void SkLumaColorFilter::onAppendStages(SkRasterPipeline* p,
                                        SkColorSpace* dst,
                                        SkArenaAlloc* scratch,
                                        bool shaderIsOpaque) const {
     p->append(SkRasterPipeline::luminance_to_alpha);
-    return true;
 }
 
 sk_sp<SkColorFilter> SkLumaColorFilter::Make() {

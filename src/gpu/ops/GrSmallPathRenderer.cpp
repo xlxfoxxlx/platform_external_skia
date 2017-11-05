@@ -87,7 +87,7 @@ GrSmallPathRenderer::~GrSmallPathRenderer() {
 
 ////////////////////////////////////////////////////////////////////////////////
 bool GrSmallPathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
-    if (!args.fShaderCaps->shaderDerivativeSupport()) {
+    if (!args.fCaps->shaderCaps()->shaderDerivativeSupport()) {
         return false;
     }
     // If the shape has no key then we won't get any reuse.
@@ -133,7 +133,7 @@ bool GrSmallPathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const {
 // padding around path bounds to allow for antialiased pixels
 static const SkScalar kAntiAliasPad = 1.0f;
 
-class SmallPathOp final : public GrMeshDrawOp {
+class SmallPathOp final : public GrLegacyMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
 
@@ -141,12 +141,12 @@ public:
     using ShapeCache = SkTDynamicHash<ShapeData, ShapeData::Key>;
     using ShapeDataList = GrSmallPathRenderer::ShapeDataList;
 
-    static std::unique_ptr<GrMeshDrawOp> Make(GrColor color, const GrShape& shape,
-                                              const SkMatrix& viewMatrix, GrDrawOpAtlas* atlas,
-                                              ShapeCache* shapeCache, ShapeDataList* shapeList,
-                                              bool gammaCorrect) {
-        return std::unique_ptr<GrMeshDrawOp>(new SmallPathOp(color, shape, viewMatrix, atlas,
-                                                             shapeCache, shapeList, gammaCorrect));
+    static std::unique_ptr<GrLegacyMeshDrawOp> Make(GrColor color, const GrShape& shape,
+                                                    const SkMatrix& viewMatrix,
+                                                    GrDrawOpAtlas* atlas, ShapeCache* shapeCache,
+                                                    ShapeDataList* shapeList, bool gammaCorrect) {
+        return std::unique_ptr<GrLegacyMeshDrawOp>(new SmallPathOp(
+                color, shape, viewMatrix, atlas, shapeCache, shapeList, gammaCorrect));
     }
 
     const char* name() const override { return "SmallPathOp"; }
@@ -199,13 +199,13 @@ private:
 
     }
 
-    void getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* color,
-                                            GrPipelineAnalysisCoverage* coverage) const override {
+    void getProcessorAnalysisInputs(GrProcessorAnalysisColor* color,
+                                    GrProcessorAnalysisCoverage* coverage) const override {
         color->setToConstant(fShapes[0].fColor);
-        *coverage = GrPipelineAnalysisCoverage::kSingleChannel;
+        *coverage = GrProcessorAnalysisCoverage::kSingleChannel;
     }
 
-    void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
+    void applyPipelineOptimizations(const PipelineOptimizations& optimizations) override {
         optimizations.getOverrideColorIfSet(&fShapes[0].fColor);
         fUsesLocalCoords = optimizations.readsLocalCoords();
     }
@@ -388,9 +388,9 @@ private:
         this->flush(target, &flushInfo);
     }
 
-    bool addDFPathToAtlas(GrMeshDrawOp::Target* target, FlushInfo* flushInfo, GrDrawOpAtlas* atlas,
-                          ShapeData* shapeData, const GrShape& shape, uint32_t dimension,
-                          SkScalar scale) const {
+    bool addDFPathToAtlas(GrLegacyMeshDrawOp::Target* target, FlushInfo* flushInfo,
+                          GrDrawOpAtlas* atlas, ShapeData* shapeData, const GrShape& shape,
+                          uint32_t dimension, SkScalar scale) const {
         const SkRect& bounds = shape.bounds();
 
         // generate bounding rect for bitmap draw
@@ -505,9 +505,9 @@ private:
         return true;
     }
 
-    bool addBMPathToAtlas(GrMeshDrawOp::Target* target, FlushInfo* flushInfo, 
-                          GrDrawOpAtlas* atlas, ShapeData* shapeData,
-                          const GrShape& shape, const SkMatrix& ctm) const {
+    bool addBMPathToAtlas(GrLegacyMeshDrawOp::Target* target, FlushInfo* flushInfo,
+                          GrDrawOpAtlas* atlas, ShapeData* shapeData, const GrShape& shape,
+                          const SkMatrix& ctm) const {
         const SkRect& bounds = shape.bounds();
         if (bounds.isEmpty()) {
             return false;
@@ -677,15 +677,16 @@ private:
         textureCoords[1] = t;
     }
 
-    void flush(GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
+    void flush(GrLegacyMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
         if (flushInfo->fInstancesToFlush) {
-            GrMesh mesh;
+            GrMesh mesh(kTriangles_GrPrimitiveType);
             int maxInstancesPerDraw =
                 static_cast<int>(flushInfo->fIndexBuffer->gpuMemorySize() / sizeof(uint16_t) / 6);
-            mesh.initInstanced(kTriangles_GrPrimitiveType, flushInfo->fVertexBuffer.get(),
-                flushInfo->fIndexBuffer.get(), flushInfo->fVertexOffset, kVerticesPerQuad,
-                kIndicesPerQuad, flushInfo->fInstancesToFlush, maxInstancesPerDraw);
-            target->draw(flushInfo->fGeometryProcessor.get(), mesh);
+            mesh.setIndexedPatterned(flushInfo->fIndexBuffer.get(), kIndicesPerQuad,
+                                     kVerticesPerQuad, flushInfo->fInstancesToFlush,
+                                     maxInstancesPerDraw);
+            mesh.setVertexData(flushInfo->fVertexBuffer.get(), flushInfo->fVertexOffset);
+            target->draw(flushInfo->fGeometryProcessor.get(), this->pipeline(), mesh);
             flushInfo->fVertexOffset += kVerticesPerQuad * flushInfo->fInstancesToFlush;
             flushInfo->fInstancesToFlush = 0;
         }
@@ -738,7 +739,7 @@ private:
     ShapeDataList* fShapeList;
     bool fGammaCorrect;
 
-    typedef GrMeshDrawOp INHERITED;
+    typedef GrLegacyMeshDrawOp INHERITED;
 };
 
 bool GrSmallPathRenderer::onDrawPath(const DrawPathArgs& args) {
@@ -760,13 +761,14 @@ bool GrSmallPathRenderer::onDrawPath(const DrawPathArgs& args) {
         }
     }
 
-    std::unique_ptr<GrMeshDrawOp> op = SmallPathOp::Make(
-            args.fPaint.getColor(), *args.fShape, *args.fViewMatrix, fAtlas.get(), &fShapeCache,
-            &fShapeList, args.fGammaCorrect);
+    std::unique_ptr<GrLegacyMeshDrawOp> op =
+            SmallPathOp::Make(args.fPaint.getColor(), *args.fShape, *args.fViewMatrix, fAtlas.get(),
+                              &fShapeCache, &fShapeList, args.fGammaCorrect);
     GrPipelineBuilder pipelineBuilder(std::move(args.fPaint), args.fAAType);
     pipelineBuilder.setUserStencil(args.fUserStencilSettings);
 
-    args.fRenderTargetContext->addMeshDrawOp(pipelineBuilder, *args.fClip, std::move(op));
+    args.fRenderTargetContext->addLegacyMeshDrawOp(std::move(pipelineBuilder), *args.fClip,
+                                                   std::move(op));
 
     return true;
 }
@@ -817,7 +819,7 @@ struct PathTestStruct {
     ShapeDataList fShapeList;
 };
 
-DRAW_OP_TEST_DEFINE(SmallPathOp) {
+GR_LEGACY_MESH_DRAW_OP_TEST_DEFINE(SmallPathOp) {
     static PathTestStruct gTestStruct;
 
     if (context->uniqueID() != gTestStruct.fContextID) {

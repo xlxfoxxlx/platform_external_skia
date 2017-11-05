@@ -20,12 +20,14 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-static inline GrColor skcolor_to_grcolor_nopremultiply(SkColor c) {
-    unsigned r = SkColorGetR(c);
-    unsigned g = SkColorGetG(c);
-    unsigned b = SkColorGetB(c);
-    return GrColorPackRGBA(r, g, b, 0xff);
+#ifdef SK_GAMMA_APPLY_TO_A8
+static inline SkColor unpremultiplied_grcolor_to_skcolor(GrColor c) {
+    unsigned r = GrColorUnpackR(c);
+    unsigned g = GrColorUnpackG(c);
+    unsigned b = GrColorUnpackB(c);
+    return SkColorSetRGB(r, g, b);
 }
+#endif
 
 static const int kDistanceAdjustLumShift = 5;
 
@@ -46,8 +48,8 @@ SkString GrAtlasTextOp::dumpInfo() const {
     return str;
 }
 
-void GrAtlasTextOp::getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* color,
-                                                       GrPipelineAnalysisCoverage* coverage) const {
+void GrAtlasTextOp::getProcessorAnalysisInputs(GrProcessorAnalysisColor* color,
+                                               GrProcessorAnalysisCoverage* coverage) const {
     if (kColorBitmapMask_MaskType == fMaskType) {
         color->setToUnknown();
     } else {
@@ -56,19 +58,19 @@ void GrAtlasTextOp::getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* 
     switch (fMaskType) {
         case kGrayscaleDistanceField_MaskType:
         case kGrayscaleCoverageMask_MaskType:
-            *coverage = GrPipelineAnalysisCoverage::kSingleChannel;
+            *coverage = GrProcessorAnalysisCoverage::kSingleChannel;
             break;
         case kLCDCoverageMask_MaskType:
         case kLCDDistanceField_MaskType:
-            *coverage = GrPipelineAnalysisCoverage::kLCD;
+            *coverage = GrProcessorAnalysisCoverage::kLCD;
             break;
         case kColorBitmapMask_MaskType:
-            *coverage = GrPipelineAnalysisCoverage::kNone;
+            *coverage = GrProcessorAnalysisCoverage::kNone;
             break;
     }
 }
 
-void GrAtlasTextOp::applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) {
+void GrAtlasTextOp::applyPipelineOptimizations(const PipelineOptimizations& optimizations) {
     optimizations.getOverrideColorIfSet(&fGeoData[0].fColor);
 
     fColor = fGeoData[0].fColor;
@@ -145,14 +147,14 @@ void GrAtlasTextOp::onPrepareDraws(Target* target) const {
     this->flush(target, &flushInfo);
 }
 
-void GrAtlasTextOp::flush(GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
-    GrMesh mesh;
+void GrAtlasTextOp::flush(GrLegacyMeshDrawOp::Target* target, FlushInfo* flushInfo) const {
+    GrMesh mesh(kTriangles_GrPrimitiveType);
     int maxGlyphsPerDraw =
             static_cast<int>(flushInfo->fIndexBuffer->gpuMemorySize() / sizeof(uint16_t) / 6);
-    mesh.initInstanced(kTriangles_GrPrimitiveType, flushInfo->fVertexBuffer.get(),
-                       flushInfo->fIndexBuffer.get(), flushInfo->fVertexOffset, kVerticesPerGlyph,
-                       kIndicesPerGlyph, flushInfo->fGlyphsToFlush, maxGlyphsPerDraw);
-    target->draw(flushInfo->fGeometryProcessor.get(), mesh);
+    mesh.setIndexedPatterned(flushInfo->fIndexBuffer.get(), kIndicesPerGlyph, kVerticesPerGlyph,
+                             flushInfo->fGlyphsToFlush, maxGlyphsPerDraw);
+    mesh.setVertexData(flushInfo->fVertexBuffer.get(), flushInfo->fVertexOffset);
+    target->draw(flushInfo->fGeometryProcessor.get(), this->pipeline(), mesh);
     flushInfo->fVertexOffset += kVerticesPerGlyph * flushInfo->fGlyphsToFlush;
     flushInfo->fGlyphsToFlush = 0;
 }
@@ -222,7 +224,7 @@ bool GrAtlasTextOp::onCombineIfPossible(GrOp* t, const GrCaps& caps) {
 // TODO trying to figure out why lcd is so whack
 sk_sp<GrGeometryProcessor> GrAtlasTextOp::setupDfProcessor(GrResourceProvider* resourceProvider,
                                                            const SkMatrix& viewMatrix,
-                                                           SkColor filteredColor,
+                                                           GrColor filteredColor,
                                                            GrColor color,
                                                            sk_sp<GrTextureProxy> proxy) const {
     GrSamplerParams params(SkShader::kClamp_TileMode, GrSamplerParams::kBilerp_FilterMode);
@@ -237,16 +239,14 @@ sk_sp<GrGeometryProcessor> GrAtlasTextOp::setupDfProcessor(GrResourceProvider* r
         flags |= kUseLCD_DistanceFieldEffectFlag;
         flags |= fUseBGR ? kBGR_DistanceFieldEffectFlag : 0;
 
-        GrColor colorNoPreMul = skcolor_to_grcolor_nopremultiply(filteredColor);
-
         float redCorrection = fDistanceAdjustTable->getAdjustment(
-                GrColorUnpackR(colorNoPreMul) >> kDistanceAdjustLumShift,
+                GrColorUnpackR(filteredColor) >> kDistanceAdjustLumShift,
                 fUseGammaCorrectDistanceTable);
         float greenCorrection = fDistanceAdjustTable->getAdjustment(
-                GrColorUnpackG(colorNoPreMul) >> kDistanceAdjustLumShift,
+                GrColorUnpackG(filteredColor) >> kDistanceAdjustLumShift,
                 fUseGammaCorrectDistanceTable);
         float blueCorrection = fDistanceAdjustTable->getAdjustment(
-                GrColorUnpackB(colorNoPreMul) >> kDistanceAdjustLumShift,
+                GrColorUnpackB(filteredColor) >> kDistanceAdjustLumShift,
                 fUseGammaCorrectDistanceTable);
         GrDistanceFieldLCDTextGeoProc::DistanceAdjust widthAdjust =
                 GrDistanceFieldLCDTextGeoProc::DistanceAdjust::Make(
@@ -258,7 +258,9 @@ sk_sp<GrGeometryProcessor> GrAtlasTextOp::setupDfProcessor(GrResourceProvider* r
                                                    this->usesLocalCoords());
     } else {
 #ifdef SK_GAMMA_APPLY_TO_A8
-        U8CPU lum = SkColorSpaceLuminance::computeLuminance(SK_GAMMA_EXPONENT, filteredColor);
+        SkColor filteredSkColor = unpremultiplied_grcolor_to_skcolor(filteredColor);
+
+        U8CPU lum = SkColorSpaceLuminance::computeLuminance(SK_GAMMA_EXPONENT, filteredSkColor);
         float correction = fDistanceAdjustTable->getAdjustment(lum >> kDistanceAdjustLumShift,
                                                                fUseGammaCorrectDistanceTable);
         return GrDistanceFieldA8TextGeoProc::Make(resourceProvider, color,

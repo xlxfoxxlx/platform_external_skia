@@ -20,6 +20,7 @@
 class GrContext;
 class GrFragmentProcessor;
 class SkColorFilter;
+class SkColorSpaceXformer;
 struct SkIPoint;
 class SkSpecialImage;
 class SkImageFilterCache;
@@ -283,6 +284,10 @@ protected:
 
     void flatten(SkWriteBuffer&) const override;
 
+    const CropRect* getCropRectIfSet() const {
+        return this->cropRectIsSet() ? &fCropRect : nullptr;
+    }
+
     /**
      *  This is the virtual which should be overridden by the derived class
      *  to perform image filtering.
@@ -395,8 +400,39 @@ protected:
     static sk_sp<SkSpecialImage> ImageToColorSpace(SkSpecialImage* src, const OutputProperties&);
 #endif
 
+    /**
+     *  Returns an image filter transformed into a new color space via the |xformer|.
+     */
+    sk_sp<SkImageFilter> makeColorSpace(SkColorSpaceXformer* xformer) const {
+        return this->onMakeColorSpace(xformer);
+    }
+    virtual sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const = 0;
+
 private:
+    // For makeColorSpace().
+    friend class ArithmeticImageFilterImpl;
+    friend class SkAlphaThresholdFilterImpl;
+    friend class SkBlurImageFilterImpl;
+    friend class SkColorFilterImageFilter;
+    friend class SkColorSpaceXformer;
+    friend class SkComposeImageFilter;
+    friend class SkDiffuseLightingImageFilter;
+    friend class SkDisplacementMapEffect;
+    friend class SkDropShadowImageFilter;
+    friend class SkImageSource;
+    friend class SkMagnifierImageFilter;
+    friend class SkMatrixConvolutionImageFilter;
+    friend class SkMatrixImageFilter;
+    friend class SkLocalMatrixImageFilter;
+    friend class SkMergeImageFilter;
+    friend class SkMorphologyImageFilter;
+    friend class SkOffsetImageFilter;
+    friend class SkSpecularLightingImageFilter;
+    friend class SkTileImageFilter;
+    friend class SkXfermodeImageFilter_Base;
+
     friend class SkGraphics;
+
     static void PurgeCache();
 
     void init(sk_sp<SkImageFilter>* inputs, int inputCount, const CropRect* cropRect);

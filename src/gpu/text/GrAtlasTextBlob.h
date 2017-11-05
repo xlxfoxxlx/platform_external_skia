@@ -24,7 +24,7 @@
 class GrBlobRegenHelper;
 struct GrDistanceFieldAdjustTable;
 class GrMemoryPool;
-class GrMeshDrawOp;
+class GrLegacyMeshDrawOp;
 class SkDrawFilter;
 class SkTextBlob;
 class SkTextBlobRunIterator;
@@ -240,7 +240,7 @@ public:
     // The color here is the GrPaint color, and it is used to determine whether we
     // have to regenerate LCD text blobs.
     // We use this color vs the SkPaint color because it has the colorfilter applied.
-    void initReusableBlob(SkColor filteredColor, const SkMatrix& viewMatrix, SkScalar x,
+    void initReusableBlob(GrColor filteredColor, const SkMatrix& viewMatrix, SkScalar x,
                           SkScalar y) {
         fFilteredPaintColor = filteredColor;
         this->setupViewMatrix(viewMatrix, x, y);
@@ -270,12 +270,10 @@ public:
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // Internal test methods
-    std::unique_ptr<GrMeshDrawOp> test_makeOp(int glyphCount, int run, int subRun,
-                                              const SkMatrix& viewMatrix, SkScalar x, SkScalar y,
-                                              const GrTextUtils::Paint& paint,
-                                              const SkSurfaceProps& props,
-                                              const GrDistanceFieldAdjustTable* distanceAdjustTable,
-                                              GrAtlasGlyphCache* cache);
+    std::unique_ptr<GrLegacyMeshDrawOp> test_makeOp(
+            int glyphCount, int run, int subRun, const SkMatrix& viewMatrix, SkScalar x, SkScalar y,
+            const GrTextUtils::Paint& paint, const SkSurfaceProps& props,
+            const GrDistanceFieldAdjustTable* distanceAdjustTable, GrAtlasGlyphCache* cache);
 
 private:
     GrAtlasTextBlob()
@@ -489,7 +487,7 @@ private:
                    Run* run, Run::SubRunInfo* info, SkAutoGlyphCache*, int glyphCount,
                    size_t vertexStride, GrColor color, SkScalar transX, SkScalar transY) const;
 
-    inline std::unique_ptr<GrMeshDrawOp> makeOp(
+    inline std::unique_ptr<GrLegacyMeshDrawOp> makeOp(
             const Run::SubRunInfo& info, int glyphCount, int run, int subRun,
             const SkMatrix& viewMatrix, SkScalar x, SkScalar y, const GrTextUtils::Paint& paint,
             const SkSurfaceProps& props, const GrDistanceFieldAdjustTable* distanceAdjustTable,
@@ -532,7 +530,7 @@ private:
     SkMatrix fInitialViewMatrix;
     SkMatrix fInitialViewMatrixInverse;
     size_t fSize;
-    SkColor fFilteredPaintColor;
+    GrColor fFilteredPaintColor;
     SkScalar fInitialX;
     SkScalar fInitialY;
 

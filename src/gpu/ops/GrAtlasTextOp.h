@@ -13,7 +13,7 @@
 #include "text/GrAtlasTextContext.h"
 #include "text/GrDistanceFieldAdjustTable.h"
 
-class GrAtlasTextOp final : public GrMeshDrawOp {
+class GrAtlasTextOp final : public GrLegacyMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
 
@@ -64,7 +64,7 @@ public:
     static std::unique_ptr<GrAtlasTextOp> MakeDistanceField(
             int glyphCount, GrAtlasGlyphCache* fontCache,
             const GrDistanceFieldAdjustTable* distanceAdjustTable,
-            bool useGammaCorrectDistanceTable, SkColor filteredColor, bool isLCD, bool useBGR) {
+            bool useGammaCorrectDistanceTable, GrColor filteredColor, bool isLCD, bool useBGR) {
         std::unique_ptr<GrAtlasTextOp> op(new GrAtlasTextOp);
 
         op->fFontCache = fontCache;
@@ -99,9 +99,9 @@ public:
     SkString dumpInfo() const override;
 
 private:
-    void getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor*,
-                                            GrPipelineAnalysisCoverage*) const override;
-    void applyPipelineOptimizations(const GrPipelineOptimizations&) override;
+    void getProcessorAnalysisInputs(GrProcessorAnalysisColor*,
+                                    GrProcessorAnalysisCoverage*) const override;
+    void applyPipelineOptimizations(const PipelineOptimizations&) override;
 
     struct FlushInfo {
         sk_sp<const GrBuffer> fVertexBuffer;
@@ -138,7 +138,7 @@ private:
         return kLCDCoverageMask_MaskType == fMaskType || kLCDDistanceField_MaskType == fMaskType;
     }
 
-    inline void flush(GrMeshDrawOp::Target* target, FlushInfo* flushInfo) const;
+    inline void flush(GrLegacyMeshDrawOp::Target* target, FlushInfo* flushInfo) const;
 
     GrColor color() const { return fColor; }
     const SkMatrix& viewMatrix() const { return fGeoData[0].fViewMatrix; }
@@ -150,7 +150,7 @@ private:
     // TODO just use class params
     // TODO trying to figure out why lcd is so whack
     sk_sp<GrGeometryProcessor> setupDfProcessor(GrResourceProvider*,
-                                                const SkMatrix& viewMatrix, SkColor filteredColor,
+                                                const SkMatrix& viewMatrix, GrColor filteredColor,
                                                 GrColor color, sk_sp<GrTextureProxy> proxy) const;
 
     GrColor fColor;
@@ -175,12 +175,12 @@ private:
 
     // Distance field properties
     sk_sp<const GrDistanceFieldAdjustTable> fDistanceAdjustTable;
-    SkColor fFilteredColor;
+    GrColor fFilteredColor;
     bool fUseGammaCorrectDistanceTable;
 
     friend class GrBlobRegenHelper;  // Needs to trigger flushes
 
-    typedef GrMeshDrawOp INHERITED;
+    typedef GrLegacyMeshDrawOp INHERITED;
 };
 
 /*
@@ -189,7 +189,7 @@ private:
  */
 class GrBlobRegenHelper {
 public:
-    GrBlobRegenHelper(const GrAtlasTextOp* op, GrMeshDrawOp::Target* target,
+    GrBlobRegenHelper(const GrAtlasTextOp* op, GrLegacyMeshDrawOp::Target* target,
                       GrAtlasTextOp::FlushInfo* flushInfo)
             : fOp(op), fTarget(target), fFlushInfo(flushInfo) {}
 
@@ -199,7 +199,7 @@ public:
 
 private:
     const GrAtlasTextOp* fOp;
-    GrMeshDrawOp::Target* fTarget;
+    GrLegacyMeshDrawOp::Target* fTarget;
     GrAtlasTextOp::FlushInfo* fFlushInfo;
 };
 

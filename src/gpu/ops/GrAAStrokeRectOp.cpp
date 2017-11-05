@@ -110,7 +110,7 @@ static sk_sp<GrGeometryProcessor> create_stroke_rect_gp(bool tweakAlphaForCovera
                               viewMatrix);
 }
 
-class AAStrokeRectOp final : public GrMeshDrawOp {
+class AAStrokeRectOp final : public GrLegacyMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
 
@@ -125,8 +125,8 @@ public:
         fMiterStroke = true;
     }
 
-    static std::unique_ptr<GrMeshDrawOp> Make(GrColor color, const SkMatrix& viewMatrix,
-                                              const SkRect& rect, const SkStrokeRec& stroke) {
+    static std::unique_ptr<GrLegacyMeshDrawOp> Make(GrColor color, const SkMatrix& viewMatrix,
+                                                    const SkRect& rect, const SkStrokeRec& stroke) {
         bool isMiter;
         if (!allowed_stroke(stroke, &isMiter)) {
             return nullptr;
@@ -148,7 +148,7 @@ public:
             op->setBounds(bounds, HasAABloat::kYes, IsZeroArea::kNo);
         }
         op->fViewMatrix = viewMatrix;
-        return std::unique_ptr<GrMeshDrawOp>(op);
+        return std::unique_ptr<GrLegacyMeshDrawOp>(op);
     }
 
     const char* name() const override { return "AAStrokeRect"; }
@@ -174,12 +174,12 @@ public:
 private:
     AAStrokeRectOp() : INHERITED(ClassID()) {}
 
-    void getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* color,
-                                            GrPipelineAnalysisCoverage* coverage) const override {
+    void getProcessorAnalysisInputs(GrProcessorAnalysisColor* color,
+                                    GrProcessorAnalysisCoverage* coverage) const override {
         color->setToConstant(fRects[0].fColor);
-        *coverage = GrPipelineAnalysisCoverage::kSingleChannel;
+        *coverage = GrProcessorAnalysisCoverage::kSingleChannel;
     }
-    void applyPipelineOptimizations(const GrPipelineOptimizations&) override;
+    void applyPipelineOptimizations(const PipelineOptimizations&) override;
     void onPrepareDraws(Target*) const override;
 
     static const int kMiterIndexCnt = 3 * 24;
@@ -227,10 +227,10 @@ private:
     SkMatrix fViewMatrix;
     bool fMiterStroke;
 
-    typedef GrMeshDrawOp INHERITED;
+    typedef GrLegacyMeshDrawOp INHERITED;
 };
 
-void AAStrokeRectOp::applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) {
+void AAStrokeRectOp::applyPipelineOptimizations(const PipelineOptimizations& optimizations) {
     optimizations.getOverrideColorIfSet(&fRects[0].fColor);
 
     fUsesLocalCoords = optimizations.readsLocalCoords();
@@ -262,9 +262,9 @@ void AAStrokeRectOp::onPrepareDraws(Target* target) const {
 
     const sk_sp<const GrBuffer> indexBuffer(
             GetIndexBuffer(target->resourceProvider(), this->miterStroke()));
-    InstancedHelper helper;
+    PatternHelper helper(kTriangles_GrPrimitiveType);
     void* vertices =
-            helper.init(target, kTriangles_GrPrimitiveType, vertexStride, indexBuffer.get(),
+            helper.init(target, vertexStride, indexBuffer.get(),
                         verticesPerInstance, indicesPerInstance, instanceCount);
     if (!vertices || !indexBuffer) {
         SkDebugf("Could not allocate vertices\n");
@@ -286,7 +286,7 @@ void AAStrokeRectOp::onPrepareDraws(Target* target) const {
                                            info.fDegenerate,
                                            canTweakAlphaForCoverage);
     }
-    helper.recordDraw(target, gp.get());
+    helper.recordDraw(target, gp.get(), this->pipeline());
 }
 
 const GrBuffer* AAStrokeRectOp::GetIndexBuffer(GrResourceProvider* resourceProvider,
@@ -312,7 +312,7 @@ const GrBuffer* AAStrokeRectOp::GetIndexBuffer(GrResourceProvider* resourceProvi
         // clang-format on
         GR_STATIC_ASSERT(SK_ARRAY_COUNT(gMiterIndices) == kMiterIndexCnt);
         GR_DEFINE_STATIC_UNIQUE_KEY(gMiterIndexBufferKey);
-        return resourceProvider->findOrCreateInstancedIndexBuffer(
+        return resourceProvider->findOrCreatePatternedIndexBuffer(
                 gMiterIndices, kMiterIndexCnt, kNumMiterRectsInIndexBuffer, kMiterVertexCnt,
                 gMiterIndexBufferKey);
     } else {
@@ -377,7 +377,7 @@ const GrBuffer* AAStrokeRectOp::GetIndexBuffer(GrResourceProvider* resourceProvi
         GR_STATIC_ASSERT(SK_ARRAY_COUNT(gBevelIndices) == kBevelIndexCnt);
 
         GR_DEFINE_STATIC_UNIQUE_KEY(gBevelIndexBufferKey);
-        return resourceProvider->findOrCreateInstancedIndexBuffer(
+        return resourceProvider->findOrCreatePatternedIndexBuffer(
                 gBevelIndices, kBevelIndexCnt, kNumBevelRectsInIndexBuffer, kBevelVertexCnt,
                 gBevelIndexBufferKey);
     }
@@ -571,18 +571,18 @@ void AAStrokeRectOp::generateAAStrokeRectGeometry(void* vertices,
 
 namespace GrAAStrokeRectOp {
 
-std::unique_ptr<GrMeshDrawOp> MakeFillBetweenRects(GrColor color,
-                                                   const SkMatrix& viewMatrix,
-                                                   const SkRect& devOutside,
-                                                   const SkRect& devInside) {
-    return std::unique_ptr<GrMeshDrawOp>(
+std::unique_ptr<GrLegacyMeshDrawOp> MakeFillBetweenRects(GrColor color,
+                                                         const SkMatrix& viewMatrix,
+                                                         const SkRect& devOutside,
+                                                         const SkRect& devInside) {
+    return std::unique_ptr<GrLegacyMeshDrawOp>(
             new AAStrokeRectOp(color, viewMatrix, devOutside, devInside));
 }
 
-std::unique_ptr<GrMeshDrawOp> Make(GrColor color,
-                                   const SkMatrix& viewMatrix,
-                                   const SkRect& rect,
-                                   const SkStrokeRec& stroke) {
+std::unique_ptr<GrLegacyMeshDrawOp> Make(GrColor color,
+                                         const SkMatrix& viewMatrix,
+                                         const SkRect& rect,
+                                         const SkStrokeRec& stroke) {
     return AAStrokeRectOp::Make(color, viewMatrix, rect, stroke);
 }
 }
@@ -593,7 +593,7 @@ std::unique_ptr<GrMeshDrawOp> Make(GrColor color,
 
 #include "GrDrawOpTest.h"
 
-DRAW_OP_TEST_DEFINE(AAStrokeRectOp) {
+GR_LEGACY_MESH_DRAW_OP_TEST_DEFINE(AAStrokeRectOp) {
     bool miterStroke = random->nextBool();
 
     // Create either a empty rect or a non-empty rect.

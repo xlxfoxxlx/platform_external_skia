@@ -37,15 +37,13 @@ GrAlphaThresholdFragmentProcessor::GrAlphaThresholdFragmentProcessor(
         : INHERITED(OptFlags(outerThreshold))
         , fInnerThreshold(innerThreshold)
         , fOuterThreshold(outerThreshold)
-        , fImageCoordTransform(resourceProvider, SkMatrix::I(), proxy.get(),
-                               GrSamplerParams::kNone_FilterMode)
+        , fImageCoordTransform(resourceProvider, SkMatrix::I(), proxy.get())
         , fImageTextureSampler(resourceProvider, std::move(proxy))
         , fColorSpaceXform(std::move(colorSpaceXform))
         , fMaskCoordTransform(
                   resourceProvider,
                   SkMatrix::MakeTrans(SkIntToScalar(-bounds.x()), SkIntToScalar(-bounds.y())),
-                  maskProxy.get(),
-                  GrSamplerParams::kNone_FilterMode)
+                  maskProxy.get())
         , fMaskTextureSampler(resourceProvider, maskProxy) {
     this->initClassID<GrAlphaThresholdFragmentProcessor>();
     this->addCoordTransform(&fImageCoordTransform);
@@ -74,7 +72,7 @@ public:
     }
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fInnerThresholdVar;
@@ -129,12 +127,11 @@ void GrGLAlphaThresholdFragmentProcessor::emitCode(EmitArgs& args) {
                             "color.a = inner_thresh;"
                             "}");
 
-    fragBuilder->codeAppendf("%s = %s;", args.fOutputColor,
-                             (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr4("color")).c_str());
+    fragBuilder->codeAppendf("%s = %s * color;", args.fOutputColor, args.fInputColor);
 }
 
 void GrGLAlphaThresholdFragmentProcessor::onSetData(const GrGLSLProgramDataManager& pdman,
-                                                    const GrProcessor& proc) {
+                                                    const GrFragmentProcessor& proc) {
     const GrAlphaThresholdFragmentProcessor& atfp = proc.cast<GrAlphaThresholdFragmentProcessor>();
     pdman.set1f(fInnerThresholdVar, atfp.innerThreshold());
     pdman.set1f(fOuterThresholdVar, atfp.outerThreshold());

@@ -113,7 +113,7 @@ private:
     class GLFP : public GrGLSLFragmentProcessor {
     public:
         void emitCode(EmitArgs& args) override {
-            this->emitChild(0, nullptr, args);
+            this->emitChild(0, args);
         }
 
     private:
@@ -148,7 +148,7 @@ static sk_sp<GrRenderTargetContext> random_render_target_context(GrContext* cont
                                                 : kBottomLeft_GrSurfaceOrigin;
     int sampleCnt = random->nextBool() ? SkTMin(4, caps->maxSampleCount()) : 0;
 
-    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeRenderTargetContext(
+    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeDeferredRenderTargetContext(
                                                                            SkBackingFit::kExact,
                                                                            kRenderTargetWidth,
                                                                            kRenderTargetHeight,
@@ -218,7 +218,11 @@ static void set_random_color_coverage_stages(GrPaint* paint,
     if (d->fRandom->nextF() < procTreeProbability) {
         // A full tree with 5 levels (31 nodes) may cause a program that exceeds shader limits
         // (e.g. uniform or varying limits); maxTreeLevels should be a number from 1 to 4 inclusive.
-        const int maxTreeLevels = 4;
+        int maxTreeLevels = 4;
+        // On iOS we can exceed the maximum number of varyings. http://skbug.com/6627.
+#ifdef SK_BUILD_FOR_IOS
+        maxTreeLevels = 2;
+#endif
         sk_sp<GrFragmentProcessor> fp(create_random_proc_tree(d, 2, maxTreeLevels));
         paint->addColorFragmentProcessor(std::move(fp));
     } else {
@@ -240,43 +244,15 @@ static void set_random_color_coverage_stages(GrPaint* paint,
     }
 }
 
-static bool set_random_state(GrPaint* paint, SkRandom* random) {
+static void set_random_state(GrPaint* paint, SkRandom* random) {
     if (random->nextBool()) {
         paint->setDisableOutputConversionToSRGB(true);
     }
     if (random->nextBool()) {
         paint->setAllowSRGBInputs(true);
     }
-    return random->nextBool();
 }
 
-// right now, the only thing we seem to care about in drawState's stencil is 'doesWrite()'
-static const GrUserStencilSettings* get_random_stencil(SkRandom* random) {
-    static constexpr GrUserStencilSettings kDoesWriteStencil(
-        GrUserStencilSettings::StaticInit<
-            0xffff,
-            GrUserStencilTest::kAlways,
-            0xffff,
-            GrUserStencilOp::kReplace,
-            GrUserStencilOp::kReplace,
-            0xffff>()
-    );
-    static constexpr GrUserStencilSettings kDoesNotWriteStencil(
-        GrUserStencilSettings::StaticInit<
-            0xffff,
-            GrUserStencilTest::kNever,
-            0xffff,
-            GrUserStencilOp::kKeep,
-            GrUserStencilOp::kKeep,
-            0xffff>()
-    );
-
-    if (random->nextBool()) {
-        return &kDoesWriteStencil;
-    } else {
-        return &kDoesNotWriteStencil;
-    }
-}
 #endif
 
 #if !GR_TEST_UTILS
@@ -285,27 +261,29 @@ bool GrDrawingManager::ProgramUnitTest(GrContext*, int) { return true; }
 bool GrDrawingManager::ProgramUnitTest(GrContext* context, int maxStages) {
     GrDrawingManager* drawingManager = context->contextPriv().drawingManager();
 
+    sk_sp<GrTextureProxy> proxies[2];
+
     // setup dummy textures
     GrSurfaceDesc dummyDesc;
     dummyDesc.fFlags = kRenderTarget_GrSurfaceFlag;
+    dummyDesc.fOrigin = kBottomLeft_GrSurfaceOrigin;
     dummyDesc.fConfig = kRGBA_8888_GrPixelConfig;
     dummyDesc.fWidth = 34;
     dummyDesc.fHeight = 18;
-    sk_sp<GrTexture> dummyTexture1(
-        context->resourceProvider()->createTexture(dummyDesc, SkBudgeted::kNo, nullptr, 0));
+    proxies[0] = GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                              dummyDesc, SkBudgeted::kNo, nullptr, 0);
     dummyDesc.fFlags = kNone_GrSurfaceFlags;
+    dummyDesc.fOrigin = kTopLeft_GrSurfaceOrigin;
     dummyDesc.fConfig = kAlpha_8_GrPixelConfig;
     dummyDesc.fWidth = 16;
     dummyDesc.fHeight = 22;
-    sk_sp<GrTexture> dummyTexture2(
-        context->resourceProvider()->createTexture(dummyDesc, SkBudgeted::kNo, nullptr, 0));
+    proxies[1] = GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                              dummyDesc, SkBudgeted::kNo, nullptr, 0);
 
-    if (!dummyTexture1 || ! dummyTexture2) {
+    if (!proxies[0] || !proxies[1]) {
         SkDebugf("Could not allocate dummy textures");
         return false;
     }
-
-    GrTexture* dummyTextures[] = {dummyTexture1.get(), dummyTexture2.get()};
 
     // dummy scissor state
     GrScissorState scissor;
@@ -321,29 +299,18 @@ bool GrDrawingManager::ProgramUnitTest(GrContext* context, int maxStages) {
             return false;
         }
 
-        GrPaint grPaint;
-
-        std::unique_ptr<GrMeshDrawOp> op(GrRandomDrawOp(&random, context));
-        SkASSERT(op);
-
-        GrProcessorTestData ptd(&random, context, renderTargetContext.get(), dummyTextures);
-        set_random_color_coverage_stages(&grPaint, &ptd, maxStages);
-        set_random_xpf(&grPaint, &ptd);
-        bool snapToCenters = set_random_state(&grPaint, &random);
-        const GrUserStencilSettings* uss = get_random_stencil(&random);
-        // We don't use kHW because we will hit an assertion if the render target is not
-        // multisampled
-        static constexpr GrAAType kAATypes[] = {GrAAType::kNone, GrAAType::kCoverage};
-        GrAAType aaType = kAATypes[random.nextULessThan(SK_ARRAY_COUNT(kAATypes))];
-
-        renderTargetContext->priv().testingOnly_addMeshDrawOp(std::move(grPaint), aaType,
-                                                              std::move(op), uss, snapToCenters);
+        GrPaint paint;
+        GrProcessorTestData ptd(&random, context, renderTargetContext.get(), proxies);
+        set_random_color_coverage_stages(&paint, &ptd, maxStages);
+        set_random_xpf(&paint, &ptd);
+        set_random_state(&paint, &random);
+        GrDrawRandomOp(&random, renderTargetContext.get(), std::move(paint));
     }
     // Flush everything, test passes if flush is successful(ie, no asserts are hit, no crashes)
-    drawingManager->flush();
+    drawingManager->flush(nullptr);
 
     // Validate that GrFPs work correctly without an input.
-    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeRenderTargetContext(
+    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeDeferredRenderTargetContext(
                                                                            SkBackingFit::kExact,
                                                                            kRenderTargetWidth,
                                                                            kRenderTargetHeight,
@@ -358,21 +325,17 @@ bool GrDrawingManager::ProgramUnitTest(GrContext* context, int maxStages) {
     for (int i = 0; i < fpFactoryCnt; ++i) {
         // Since FP factories internally randomize, call each 10 times.
         for (int j = 0; j < 10; ++j) {
-            std::unique_ptr<GrMeshDrawOp> op(GrRandomDrawOp(&random, context));
-            SkASSERT(op);
-            GrProcessorTestData ptd(&random, context, renderTargetContext.get(), dummyTextures);
-            GrPaint grPaint;
-            grPaint.setXPFactory(GrPorterDuffXPFactory::Get(SkBlendMode::kSrc));
+            GrProcessorTestData ptd(&random, context, renderTargetContext.get(), proxies);
 
+            GrPaint paint;
+            paint.setXPFactory(GrPorterDuffXPFactory::Get(SkBlendMode::kSrc));
             sk_sp<GrFragmentProcessor> fp(
                 GrProcessorTestFactory<GrFragmentProcessor>::MakeIdx(i, &ptd));
             sk_sp<GrFragmentProcessor> blockFP(
                 BlockInputFragmentProcessor::Make(std::move(fp)));
-            grPaint.addColorFragmentProcessor(std::move(blockFP));
-
-            renderTargetContext->priv().testingOnly_addMeshDrawOp(
-                    std::move(grPaint), GrAAType::kNone, std::move(op));
-            drawingManager->flush();
+            paint.addColorFragmentProcessor(std::move(blockFP));
+            GrDrawRandomOp(&random, renderTargetContext.get(), std::move(paint));
+            drawingManager->flush(nullptr);
         }
     }
 
@@ -382,54 +345,30 @@ bool GrDrawingManager::ProgramUnitTest(GrContext* context, int maxStages) {
 
 static int get_glprograms_max_stages(GrContext* context) {
     GrGLGpu* gpu = static_cast<GrGLGpu*>(context->getGpu());
-    /*
-     * For the time being, we only support the test with desktop GL or for android on
-     * ARM platforms
-     * TODO When we run ES 3.00 GLSL in more places, test again
-     */
-    if (kGL_GrGLStandard == gpu->glStandard() ||
-        kARM_GrGLVendor == gpu->ctxInfo().vendor()) {
-        return 6;
-    } else if (kTegra3_GrGLRenderer == gpu->ctxInfo().renderer() ||
-               kOther_GrGLRenderer == gpu->ctxInfo().renderer()) {
-        return 1;
-    }
-    return 0;
-}
-
-static void test_glprograms_native(skiatest::Reporter* reporter,
-                                   const sk_gpu_test::ContextInfo& ctxInfo) {
-    int maxStages = get_glprograms_max_stages(ctxInfo.grContext());
-    if (maxStages == 0) {
-        return;
-    }
-    REPORTER_ASSERT(reporter, GrDrawingManager::ProgramUnitTest(ctxInfo.grContext(), maxStages));
-}
-
-static void test_glprograms_other_contexts(
-            skiatest::Reporter* reporter,
-            const sk_gpu_test::ContextInfo& ctxInfo) {
-    int maxStages = get_glprograms_max_stages(ctxInfo.grContext());
-#ifdef SK_BUILD_FOR_WIN
-    // Some long shaders run out of temporary registers in the D3D compiler on ANGLE and
-    // command buffer.
-    maxStages = SkTMin(maxStages, 2);
+    int maxStages = 6;
+    if (kGLES_GrGLStandard == gpu->glStandard()) {
+    // We've had issues with driver crashes and HW limits being exceeded with many effects on
+    // Android devices. We have passes on ARM devices with the default number of stages.
+    // TODO When we run ES 3.00 GLSL in more places, test again
+#ifdef SK_BUILD_FOR_ANDROID
+        if (kARM_GrGLVendor != gpu->ctxInfo().vendor()) {
+            maxStages = 1;
+        }
 #endif
+    // On iOS we can exceed the maximum number of varyings. http://skbug.com/6627.
+#ifdef SK_BUILD_FOR_IOS
+        maxStages = 3;
+#endif
+    }
+    return maxStages;
+}
+
+static void test_glprograms(skiatest::Reporter* reporter, const sk_gpu_test::ContextInfo& ctxInfo) {
+    int maxStages = get_glprograms_max_stages(ctxInfo.grContext());
     if (maxStages == 0) {
         return;
     }
     REPORTER_ASSERT(reporter, GrDrawingManager::ProgramUnitTest(ctxInfo.grContext(), maxStages));
-}
-
-static bool is_native_gl_context_type(sk_gpu_test::GrContextFactory::ContextType type) {
-    return type == sk_gpu_test::GrContextFactory::kGL_ContextType ||
-           type == sk_gpu_test::GrContextFactory::kGLES_ContextType;
-}
-
-static bool is_other_rendering_gl_context_type(sk_gpu_test::GrContextFactory::ContextType type) {
-    return !is_native_gl_context_type(type) &&
-           kOpenGL_GrBackend == sk_gpu_test::GrContextFactory::ContextTypeBackend(type) &&
-           sk_gpu_test::GrContextFactory::IsRenderingContext(type);
 }
 
 DEF_GPUTEST(GLPrograms, reporter, /*factory*/) {
@@ -445,10 +384,8 @@ DEF_GPUTEST(GLPrograms, reporter, /*factory*/) {
     GrContextOptions opts;
     opts.fSuppressPrints = true;
     sk_gpu_test::GrContextFactory debugFactory(opts);
-    skiatest::RunWithGPUTestContexts(test_glprograms_native, &is_native_gl_context_type,
-                                     reporter, &debugFactory);
-    skiatest::RunWithGPUTestContexts(test_glprograms_other_contexts,
-                                     &is_other_rendering_gl_context_type, reporter, &debugFactory);
+    skiatest::RunWithGPUTestContexts(test_glprograms, &skiatest::IsRenderingGLContextType, reporter,
+                                     &debugFactory);
 }
 
 #endif

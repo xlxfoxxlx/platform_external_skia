@@ -64,7 +64,7 @@ GR_DECLARE_STATIC_UNIQUE_KEY(gQuadsIndexBufferKey);
 
 static const GrBuffer* ref_quads_index_buffer(GrResourceProvider* resourceProvider) {
     GR_DEFINE_STATIC_UNIQUE_KEY(gQuadsIndexBufferKey);
-    return resourceProvider->findOrCreateInstancedIndexBuffer(
+    return resourceProvider->findOrCreatePatternedIndexBuffer(
         kQuadIdxBufPattern, kIdxsPerQuad, kQuadsNumInIdxBuffer, kQuadNumVertices,
         gQuadsIndexBufferKey);
 }
@@ -98,7 +98,7 @@ GR_DECLARE_STATIC_UNIQUE_KEY(gLinesIndexBufferKey);
 
 static const GrBuffer* ref_lines_index_buffer(GrResourceProvider* resourceProvider) {
     GR_DEFINE_STATIC_UNIQUE_KEY(gLinesIndexBufferKey);
-    return resourceProvider->findOrCreateInstancedIndexBuffer(
+    return resourceProvider->findOrCreatePatternedIndexBuffer(
         kLineSegIdxBufPattern, kIdxsPerLineSeg,  kLineSegsNumInIdxBuffer, kLineSegNumVertices,
         gLinesIndexBufferKey);
 }
@@ -624,7 +624,7 @@ bool GrAAHairLinePathRenderer::onCanDrawPath(const CanDrawPathArgs& args) const 
     }
 
     if (SkPath::kLine_SegmentMask == args.fShape->segmentMask() ||
-        args.fShaderCaps->shaderDerivativeSupport()) {
+        args.fCaps->shaderCaps()->shaderDerivativeSupport()) {
         return true;
     }
 
@@ -668,22 +668,22 @@ bool check_bounds(const SkMatrix& viewMatrix, const SkRect& devBounds, void* ver
     return true;
 }
 
-class AAHairlineOp final : public GrMeshDrawOp {
+class AAHairlineOp final : public GrLegacyMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
 
-    static std::unique_ptr<GrMeshDrawOp> Make(GrColor color,
-                                              const SkMatrix& viewMatrix,
-                                              const SkPath& path,
-                                              const GrStyle& style,
-                                              const SkIRect& devClipBounds) {
+    static std::unique_ptr<GrLegacyMeshDrawOp> Make(GrColor color,
+                                                    const SkMatrix& viewMatrix,
+                                                    const SkPath& path,
+                                                    const GrStyle& style,
+                                                    const SkIRect& devClipBounds) {
         SkScalar hairlineCoverage;
         uint8_t newCoverage = 0xff;
         if (GrPathRenderer::IsStrokeHairlineOrEquivalent(style, viewMatrix, &hairlineCoverage)) {
             newCoverage = SkScalarRoundToInt(hairlineCoverage * 0xff);
         }
 
-        return std::unique_ptr<GrMeshDrawOp>(
+        return std::unique_ptr<GrLegacyMeshDrawOp>(
                 new AAHairlineOp(color, newCoverage, viewMatrix, path, devClipBounds));
     }
 
@@ -710,13 +710,13 @@ private:
                                    IsZeroArea::kYes);
     }
 
-    void getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* color,
-                                            GrPipelineAnalysisCoverage* coverage) const override {
+    void getProcessorAnalysisInputs(GrProcessorAnalysisColor* color,
+                                    GrProcessorAnalysisCoverage* coverage) const override {
         color->setToConstant(fColor);
-        *coverage = GrPipelineAnalysisCoverage::kSingleChannel;
+        *coverage = GrProcessorAnalysisCoverage::kSingleChannel;
     }
 
-    void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
+    void applyPipelineOptimizations(const PipelineOptimizations& optimizations) override {
         optimizations.getOverrideColorIfSet(&fColor);
         fUsesLocalCoords = optimizations.readsLocalCoords();
     }
@@ -783,7 +783,7 @@ private:
 
     SkSTArray<1, PathData, true> fPaths;
 
-    typedef GrMeshDrawOp INHERITED;
+    typedef GrLegacyMeshDrawOp INHERITED;
 };
 
 void AAHairlineOp::onPrepareDraws(Target* target) const {
@@ -860,11 +860,11 @@ void AAHairlineOp::onPrepareDraws(Target* target) const {
             add_line(&lines[2*i], toSrc, this->coverage(), &verts);
         }
 
-        GrMesh mesh;
-        mesh.initInstanced(kTriangles_GrPrimitiveType, vertexBuffer, linesIndexBuffer.get(),
-                           firstVertex, kLineSegNumVertices, kIdxsPerLineSeg, lineCount,
-                           kLineSegsNumInIdxBuffer);
-        target->draw(lineGP.get(), mesh);
+        GrMesh mesh(kTriangles_GrPrimitiveType);
+        mesh.setIndexedPatterned(linesIndexBuffer.get(), kIdxsPerLineSeg, kLineSegNumVertices,
+                                 lineCount, kLineSegsNumInIdxBuffer);
+        mesh.setVertexData(vertexBuffer, firstVertex);
+        target->draw(lineGP.get(), this->pipeline(), mesh);
     }
 
     if (quadCount || conicCount) {
@@ -917,20 +917,20 @@ void AAHairlineOp::onPrepareDraws(Target* target) const {
         }
 
         if (quadCount > 0) {
-            GrMesh mesh;
-            mesh.initInstanced(kTriangles_GrPrimitiveType, vertexBuffer, quadsIndexBuffer.get(),
-                               firstVertex, kQuadNumVertices, kIdxsPerQuad, quadCount,
-                               kQuadsNumInIdxBuffer);
-            target->draw(quadGP.get(), mesh);
+            GrMesh mesh(kTriangles_GrPrimitiveType);
+            mesh.setIndexedPatterned(quadsIndexBuffer.get(), kIdxsPerQuad, kQuadNumVertices,
+                                     quadCount, kQuadsNumInIdxBuffer);
+            mesh.setVertexData(vertexBuffer, firstVertex);
+            target->draw(quadGP.get(), this->pipeline(), mesh);
             firstVertex += quadCount * kQuadNumVertices;
         }
 
         if (conicCount > 0) {
-            GrMesh mesh;
-            mesh.initInstanced(kTriangles_GrPrimitiveType, vertexBuffer, quadsIndexBuffer.get(),
-                               firstVertex, kQuadNumVertices, kIdxsPerQuad, conicCount,
-                               kQuadsNumInIdxBuffer);
-            target->draw(conicGP.get(), mesh);
+            GrMesh mesh(kTriangles_GrPrimitiveType);
+            mesh.setIndexedPatterned(quadsIndexBuffer.get(), kIdxsPerQuad, kQuadNumVertices,
+                                     conicCount, kQuadsNumInIdxBuffer);
+            mesh.setVertexData(vertexBuffer, firstVertex);
+            target->draw(conicGP.get(), this->pipeline(), mesh);
         }
     }
 }
@@ -938,7 +938,7 @@ void AAHairlineOp::onPrepareDraws(Target* target) const {
 bool GrAAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
     GR_AUDIT_TRAIL_AUTO_FRAME(args.fRenderTargetContext->auditTrail(),
                               "GrAAHairlinePathRenderer::onDrawPath");
-    SkASSERT(!args.fRenderTargetContext->isUnifiedMultisampled());
+    SkASSERT(GrFSAAType::kUnifiedMSAA != args.fRenderTargetContext->fsaaType());
 
     SkIRect devClipBounds;
     args.fClip->getConservativeBounds(args.fRenderTargetContext->width(),
@@ -946,11 +946,12 @@ bool GrAAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
                                       &devClipBounds);
     SkPath path;
     args.fShape->asPath(&path);
-    std::unique_ptr<GrMeshDrawOp> op = AAHairlineOp::Make(
+    std::unique_ptr<GrLegacyMeshDrawOp> op = AAHairlineOp::Make(
             args.fPaint.getColor(), *args.fViewMatrix, path, args.fShape->style(), devClipBounds);
     GrPipelineBuilder pipelineBuilder(std::move(args.fPaint), args.fAAType);
     pipelineBuilder.setUserStencil(args.fUserStencilSettings);
-    args.fRenderTargetContext->addMeshDrawOp(pipelineBuilder, *args.fClip, std::move(op));
+    args.fRenderTargetContext->addLegacyMeshDrawOp(std::move(pipelineBuilder), *args.fClip,
+                                                   std::move(op));
     return true;
 }
 
@@ -958,7 +959,7 @@ bool GrAAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
 
 #if GR_TEST_UTILS
 
-DRAW_OP_TEST_DEFINE(AAHairlineOp) {
+GR_LEGACY_MESH_DRAW_OP_TEST_DEFINE(AAHairlineOp) {
     GrColor color = GrRandomColor(random);
     SkMatrix viewMatrix = GrTest::TestMatrix(random);
     SkPath path = GrTest::TestPath(random);

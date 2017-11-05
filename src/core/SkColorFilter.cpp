@@ -5,16 +5,19 @@
  * found in the LICENSE file.
  */
 
-#include "SkColorFilter.h"
 #include "SkArenaAlloc.h"
+#include "SkColorFilter.h"
+#include "SkColorSpaceXformer.h"
+#include "SkNx.h"
+#include "SkPM4f.h"
+#include "SkRasterPipeline.h"
 #include "SkReadBuffer.h"
 #include "SkRefCnt.h"
 #include "SkString.h"
 #include "SkTDArray.h"
 #include "SkUnPreMultiply.h"
 #include "SkWriteBuffer.h"
-#include "SkPM4f.h"
-#include "SkNx.h"
+#include "../jumper/SkJumper.h"
 
 #if SK_SUPPORT_GPU
 #include "GrFragmentProcessor.h"
@@ -38,33 +41,11 @@ sk_sp<GrFragmentProcessor> SkColorFilter::asFragmentProcessor(GrContext*, SkColo
 }
 #endif
 
-bool SkColorFilter::appendStages(SkRasterPipeline* pipeline,
-                                 SkColorSpace* dst,
-                                 SkArenaAlloc* scratch,
+void SkColorFilter::appendStages(SkRasterPipeline* p,
+                                 SkColorSpace* dstCS,
+                                 SkArenaAlloc* alloc,
                                  bool shaderIsOpaque) const {
-    return this->onAppendStages(pipeline, dst, scratch, shaderIsOpaque);
-}
-
-bool SkColorFilter::onAppendStages(SkRasterPipeline*, SkColorSpace*, SkArenaAlloc*, bool) const {
-    return false;
-}
-
-void SkColorFilter::filterSpan4f(const SkPM4f src[], int count, SkPM4f result[]) const {
-    const int N = 128;
-    SkPMColor tmp[N];
-    while (count > 0) {
-        int n = SkTMin(count, N);
-        for (int i = 0; i < n; ++i) {
-            tmp[i] = src[i].toPMColor();
-        }
-        this->filterSpan(tmp, n, tmp);
-        for (int i = 0; i < n; ++i) {
-            result[i] = SkPM4f::FromPMColor(tmp[i]);
-        }
-        src += n;
-        result += n;
-        count -= n;
-    }
+    this->onAppendStages(p, dstCS, alloc, shaderIsOpaque);
 }
 
 SkColor SkColorFilter::filterColor(SkColor c) const {
@@ -73,9 +54,19 @@ SkColor SkColorFilter::filterColor(SkColor c) const {
     return SkUnPreMultiply::PMColorToColor(dst);
 }
 
+#include "SkRasterPipeline.h"
 SkColor4f SkColorFilter::filterColor4f(const SkColor4f& c) const {
     SkPM4f dst, src = c.premul();
-    this->filterSpan4f(&src, 1, &dst);
+
+    SkSTArenaAlloc<128> alloc;
+    SkRasterPipeline    pipeline(&alloc);
+
+    pipeline.append(SkRasterPipeline::constant_color, &src);
+    this->onAppendStages(&pipeline, nullptr, &alloc, c.fA == 1);
+    SkPM4f* dstPtr = &dst;
+    pipeline.append(SkRasterPipeline::store_f32, &dstPtr);
+    pipeline.run(0,0, 1);
+
     return dst.unpremul();
 }
 
@@ -103,11 +94,6 @@ public:
         fOuter->filterSpan(result, count, result);
     }
 
-    void filterSpan4f(const SkPM4f shader[], int count, SkPM4f result[]) const override {
-        fInner->filterSpan4f(shader, count, result);
-        fOuter->filterSpan4f(result, count, result);
-    }
-
 #ifndef SK_IGNORE_TO_STRING
     void toString(SkString* str) const override {
         SkString outerS, innerS;
@@ -118,6 +104,16 @@ public:
                                    innerS.c_str()));
     }
 #endif
+
+    void onAppendStages(SkRasterPipeline* p, SkColorSpace* dst, SkArenaAlloc* scratch,
+                        bool shaderIsOpaque) const override {
+        bool innerIsOpaque = shaderIsOpaque;
+        if (!(fInner->getFlags() & kAlphaUnchanged_Flag)) {
+            innerIsOpaque = false;
+        }
+        fInner->appendStages(p, dst, scratch, shaderIsOpaque);
+        fOuter->appendStages(p, dst, scratch, innerIsOpaque);
+    }
 
 #if SK_SUPPORT_GPU
     sk_sp<GrFragmentProcessor> asFragmentProcessor(GrContext* context,
@@ -153,6 +149,17 @@ private:
 
     int privateComposedFilterCount() const override {
         return fComposedFilterCount;
+    }
+
+    bool asACompose(SkColorFilter** outer, SkColorFilter** inner) const override {
+        *outer = fOuter.get();
+        *inner = fInner.get();
+        return true;
+    }
+
+    sk_sp<SkColorFilter> onMakeColorSpace(SkColorSpaceXformer* xformer) const override {
+        return SkColorFilter::MakeComposeFilter(xformer->apply(fOuter.get()),
+                                                xformer->apply(fInner.get()));
     }
 
     sk_sp<SkColorFilter> fOuter;

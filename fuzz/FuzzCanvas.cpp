@@ -38,7 +38,6 @@
 #include "SkDiscretePathEffect.h"
 #include "SkDisplacementMapEffect.h"
 #include "SkDropShadowImageFilter.h"
-#include "SkGaussianEdgeShader.h"
 #include "SkGradientShader.h"
 #include "SkHighContrastFilter.h"
 #include "SkImageSource.h"
@@ -54,6 +53,7 @@
 #include "SkPictureImageFilter.h"
 #include "SkRRectsGaussianEdgeMaskFilter.h"
 #include "SkTableColorFilter.h"
+#include "SkTextBlob.h"
 #include "SkTileImageFilter.h"
 #include "SkXfermodeImageFilter.h"
 
@@ -381,7 +381,8 @@ static sk_sp<SkShader> make_fuzz_shader(Fuzz* fuzz, int depth) {
         }
         // EFFECTS:
         case 9:
-            return SkGaussianEdgeShader::Make();
+            // Deprecated SkGaussianEdgeShader
+            return nullptr;
         case 10: {
             constexpr int kMaxColors = 12;
             SkPoint pts[2];
@@ -982,7 +983,6 @@ static SkBitmap make_fuzz_bitmap(Fuzz* fuzz) {
     fuzz->nextRange(&w, 1, 1024);
     fuzz->nextRange(&h, 1, 1024);
     bitmap.allocN32Pixels(w, h);
-    SkAutoLockPixels autoLockPixels(bitmap);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             SkColor c;
@@ -1717,9 +1717,9 @@ static void fuzz_canvas(Fuzz* fuzz, SkCanvas* canvas, int depth = 9) {
             }
             case 53: {
                 fuzz_paint(fuzz, &paint, depth - 1);
-                SkCanvas::VertexMode vertexMode;
+                SkVertices::VertexMode vertexMode;
                 SkBlendMode blendMode;
-                fuzz_enum_range(fuzz, &vertexMode, 0, SkCanvas::kTriangleFan_VertexMode);
+                fuzz_enum_range(fuzz, &vertexMode, 0, SkVertices::kTriangleFan_VertexMode);
                 fuzz->next(&blendMode);
                 constexpr int kMaxCount = 100;
                 int vertexCount;
@@ -1744,18 +1744,11 @@ static void fuzz_canvas(Fuzz* fuzz, SkCanvas* canvas, int depth = 9) {
                         fuzz->nextRange(&indices[i], 0, vertexCount - 1);
                     }
                 }
-                if (make_fuzz_t<bool>(fuzz)) {
-                    canvas->drawVertices(vertexMode, vertexCount, vertices,
-                                         useTexs ? texs : nullptr, useColors ? colors : nullptr,
-                                         blendMode, indexCount > 0 ? indices : nullptr, indexCount,
-                                         paint);
-                } else {
-                    canvas->drawVertices(SkVertices::MakeCopy(vertexMode, vertexCount, vertices,
-                                                              useTexs ? texs : nullptr,
-                                                              useColors ? colors : nullptr,
-                                                              indexCount, indices),
-                                         blendMode, paint);
-                }
+                canvas->drawVertices(SkVertices::MakeCopy(vertexMode, vertexCount, vertices,
+                                                          useTexs ? texs : nullptr,
+                                                          useColors ? colors : nullptr,
+                                                          indexCount, indices),
+                                     blendMode, paint);
                 break;
             }
             default:

@@ -18,11 +18,11 @@
 #include "GrResourceProvider.h"
 #include "GrStencilPathOp.h"
 #include "GrStyle.h"
-#include "ops/GrRectOpFactory.h"
+#include "ops/GrNonAAFillRectOp.h"
 
 GrPathRenderer* GrStencilAndCoverPathRenderer::Create(GrResourceProvider* resourceProvider,
                                                       const GrCaps& caps) {
-    if (caps.shaderCaps()->pathRenderingSupport()) {
+    if (caps.shaderCaps()->pathRenderingSupport() && !caps.avoidStencilBuffers()) {
         return new GrStencilAndCoverPathRenderer(resourceProvider);
     } else {
         return nullptr;
@@ -59,7 +59,7 @@ static GrPath* get_gr_path(GrResourceProvider* resourceProvider, const GrShape& 
     if (!path) {
         SkPath skPath;
         shape.asPath(&skPath);
-        path.reset(resourceProvider->createPath(skPath, shape.style()));
+        path = resourceProvider->createPath(skPath, shape.style());
         if (!isVolatile) {
             resourceProvider->assignUniqueKeyToResource(key, path.get());
         }
@@ -112,9 +112,6 @@ bool GrStencilAndCoverPathRenderer::onDrawPath(const DrawPathArgs& args) {
         }
         const SkMatrix& viewM = viewMatrix.hasPerspective() ? SkMatrix::I() : viewMatrix;
 
-        std::unique_ptr<GrMeshDrawOp> coverOp(GrRectOpFactory::MakeNonAAFill(
-                args.fPaint.getColor(), viewM, bounds, nullptr, &invert));
-
         // fake inverse with a stencil and cover
         args.fRenderTargetContext->priv().stencilPath(*args.fClip, args.fAAType, viewMatrix,
                                                       path.get());
@@ -138,16 +135,14 @@ bool GrStencilAndCoverPathRenderer::onDrawPath(const DrawPathArgs& args) {
             if (GrAAType::kMixedSamples == coverAAType) {
                 coverAAType = GrAAType::kNone;
             }
-            GrPipelineBuilder pipelineBuilder(std::move(args.fPaint), coverAAType);
-            pipelineBuilder.setUserStencil(&kInvertedCoverPass);
-
-            args.fRenderTargetContext->addMeshDrawOp(pipelineBuilder, *args.fClip,
-                                                     std::move(coverOp));
+            args.fRenderTargetContext->addDrawOp(
+                    *args.fClip,
+                    GrNonAAFillRectOp::Make(std::move(args.fPaint), viewM, bounds, nullptr, &invert,
+                                            coverAAType, &kInvertedCoverPass));
         }
     } else {
-        GrAA aa = GrBoolToAA(GrAATypeIsHW(args.fAAType));
         std::unique_ptr<GrDrawOp> op =
-                GrDrawPathOp::Make(viewMatrix, std::move(args.fPaint), aa, path.get());
+                GrDrawPathOp::Make(viewMatrix, std::move(args.fPaint), args.fAAType, path.get());
         args.fRenderTargetContext->addDrawOp(*args.fClip, std::move(op));
     }
 

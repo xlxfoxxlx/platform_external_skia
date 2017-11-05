@@ -10,6 +10,7 @@
 
 #include "../private/SkTemplates.h"
 #include "SkColor.h"
+#include "SkColorSpaceXform.h"
 #include "SkEncodedImageFormat.h"
 #include "SkEncodedInfo.h"
 #include "SkImageInfo.h"
@@ -277,7 +278,7 @@ public:
          *
          *  Only meaningful for multi-frame images.
          */
-        size_t                     fFrameIndex;
+        int                        fFrameIndex;
 
         /**
          *  If true, the dst already contains the prior frame.
@@ -415,10 +416,10 @@ public:
      *  @return Enum representing success or reason for failure.
      */
     Result startIncrementalDecode(const SkImageInfo& dstInfo, void* dst, size_t rowBytes,
-            const SkCodec::Options*, SkPMColor* ctable, int* ctableCount);
+            const Options*, SkPMColor* ctable, int* ctableCount);
 
     Result startIncrementalDecode(const SkImageInfo& dstInfo, void* dst, size_t rowBytes,
-            const SkCodec::Options* options) {
+            const Options* options) {
         return this->startIncrementalDecode(dstInfo, dst, rowBytes, options, nullptr, nullptr);
     }
 
@@ -483,7 +484,7 @@ public:
      *      decoding the palette.
      *  @return Enum representing success or reason for failure.
      */
-    Result startScanlineDecode(const SkImageInfo& dstInfo, const SkCodec::Options* options,
+    Result startScanlineDecode(const SkImageInfo& dstInfo, const Options* options,
             SkPMColor ctable[], int* ctableCount);
 
     /**
@@ -593,9 +594,18 @@ public:
      */
     int outputScanline(int inputScanline) const;
 
+    /**
+     *  Return the number of frames in the image.
+     *
+     *  May require reading through the stream.
+     */
+    int getFrameCount() {
+        return this->onGetFrameCount();
+    }
+
     // The required frame for an independent frame is marked as
     // kNone.
-    static constexpr size_t kNone = static_cast<size_t>(-1);
+    static constexpr int kNone = -1;
 
     /**
      *  Information about individual frames in a multi-framed image.
@@ -605,12 +615,12 @@ public:
          *  The frame that this frame needs to be blended with, or
          *  kNone.
          */
-        size_t fRequiredFrame;
+        int fRequiredFrame;
 
         /**
          *  Number of milliseconds to show this frame.
          */
-        size_t fDuration;
+        int fDuration;
 
         /**
          *  Whether the end marker for this frame is contained in the stream.
@@ -619,10 +629,30 @@ public:
          *  There could be an error in the stream.
          */
         bool fFullyReceived;
+
+        /**
+         *  This is conservative; it will still return non-opaque if e.g. a
+         *  color index-based frame has a color with alpha but does not use it.
+         */
+        SkAlphaType fAlphaType;
     };
 
     /**
-     *  Return info about the frames in the image.
+     *  Return info about a single frame.
+     *
+     *  Only supported by multi-frame images. Does not read through the stream,
+     *  so it should be called after getFrameCount() to parse any frames that
+     *  have not already been parsed.
+     */
+    bool getFrameInfo(int index, FrameInfo* info) const {
+        if (index < 0) {
+            return false;
+        }
+        return this->onGetFrameInfo(index, info);
+    }
+
+    /**
+     *  Return info about all the frames in the image.
      *
      *  May require reading through the stream to determine info about the
      *  frames (including the count).
@@ -631,9 +661,7 @@ public:
      *
      *  For single-frame images, this will return an empty vector.
      */
-    std::vector<FrameInfo> getFrameInfo() {
-        return this->onGetFrameInfo();
-    }
+    std::vector<FrameInfo> getFrameInfo();
 
     static constexpr int kRepetitionCountInfinite = -1;
 
@@ -651,12 +679,15 @@ public:
     }
 
 protected:
+    using XformFormat = SkColorSpaceXform::ColorFormat;
+
     /**
      *  Takes ownership of SkStream*
      */
     SkCodec(int width,
             int height,
             const SkEncodedInfo&,
+            XformFormat srcFormat,
             SkStream*,
             sk_sp<SkColorSpace>,
             Origin = kTopLeft_Origin);
@@ -667,6 +698,7 @@ protected:
      */
     SkCodec(const SkEncodedInfo&,
             const SkImageInfo&,
+            XformFormat srcFormat,
             SkStream*,
             Origin = kTopLeft_Origin);
 
@@ -778,7 +810,7 @@ protected:
 
     const SkImageInfo& dstInfo() const { return fDstInfo; }
 
-    const SkCodec::Options& options() const { return fOptions; }
+    const Options& options() const { return fOptions; }
 
     /**
      *  Returns the number of scanlines that have been decoded so far.
@@ -792,11 +824,18 @@ protected:
 
     bool initializeColorXform(const SkImageInfo& dstInfo,
                               SkTransferFunctionBehavior premulBehavior);
-    SkColorSpaceXform* colorXform() const { return fColorXform.get(); }
+    void applyColorXform(void* dst, const void* src, int count, SkAlphaType) const;
+    void applyColorXform(void* dst, const void* src, int count) const;
 
-    virtual std::vector<FrameInfo> onGetFrameInfo() {
-        // empty vector - this is not animated.
-        return std::vector<FrameInfo>{};
+    SkColorSpaceXform* colorXform() const { return fColorXform.get(); }
+    bool xformOnDecode() const { return fXformOnDecode; }
+
+    virtual int onGetFrameCount() {
+        return 1;
+    }
+
+    virtual bool onGetFrameInfo(int, FrameInfo*) const {
+        return false;
     }
 
     virtual int onGetRepetitionCount() {
@@ -808,13 +847,16 @@ protected:
 private:
     const SkEncodedInfo                fEncodedInfo;
     const SkImageInfo                  fSrcInfo;
+    const XformFormat                  fSrcXformFormat;
     std::unique_ptr<SkStream>          fStream;
     bool                               fNeedsRewind;
     const Origin                       fOrigin;
 
     SkImageInfo                        fDstInfo;
-    SkCodec::Options                   fOptions;
+    Options                            fOptions;
+    XformFormat                        fDstXformFormat; // Based on fDstInfo.
     std::unique_ptr<SkColorSpaceXform> fColorXform;
+    bool                               fXformOnDecode;
 
     // Only meaningful during scanline decodes.
     int                                fCurrScanline;
@@ -838,13 +880,13 @@ private:
     }
 
     // Methods for scanline decoding.
-    virtual SkCodec::Result onStartScanlineDecode(const SkImageInfo& /*dstInfo*/,
-            const SkCodec::Options& /*options*/, SkPMColor* /*ctable*/, int* /*ctableCount*/) {
+    virtual Result onStartScanlineDecode(const SkImageInfo& /*dstInfo*/,
+            const Options& /*options*/, SkPMColor* /*ctable*/, int* /*ctableCount*/) {
         return kUnimplemented;
     }
 
     virtual Result onStartIncrementalDecode(const SkImageInfo& /*dstInfo*/, void*, size_t,
-            const SkCodec::Options&, SkPMColor*, int*) {
+            const Options&, SkPMColor*, int*) {
         return kUnimplemented;
     }
 

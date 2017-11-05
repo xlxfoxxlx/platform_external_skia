@@ -11,7 +11,9 @@
 #include "SkPDFTypes.h"
 #include <utility>
 
-#define SKPDF_PRODUCER "Skia/PDF [" SK_MILESTONE "]"
+#define SKPDF_STRING(X) SKPDF_STRING_IMPL(X)
+#define SKPDF_STRING_IMPL(X) #X
+#define SKPDF_PRODUCER "Skia/PDF m" SKPDF_STRING(SK_MILESTONE)
 #define SKPDF_CUSTOM_PRODUCER_KEY "ProductionLibrary"
 
 static SkString pdf_date(const SkTime::DateTime& dt) {

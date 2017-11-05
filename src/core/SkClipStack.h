@@ -10,6 +10,7 @@
 
 #include "../private/SkMessageBus.h"
 #include "SkCanvas.h"
+#include "SkClipOpPriv.h"
 #include "SkDeque.h"
 #include "SkPath.h"
 #include "SkRRect.h"
@@ -20,8 +21,6 @@
 #if SK_SUPPORT_GPU
 #include "GrResourceKey.h"
 #endif
-
-class SkCanvasClipVisitor;
 
 // Because a single save/restore state can have multiple clips, this class
 // stores the stack depth (fSaveCount) and clips (fDeque) separately.
@@ -59,7 +58,7 @@ public:
         static const int kTypeCnt = kLastType + 1;
 
         Element() {
-            this->initCommon(0, SkClipOp::kReplace_deprecated, false);
+            this->initCommon(0, kReplace_SkClipOp, false);
             this->setEmpty();
         }
 
@@ -196,11 +195,6 @@ public:
             return kPath_Type == fType && fPath.get()->isInverseFillType();
         }
 
-        /**
-        * Replay this clip into the visitor.
-        */
-        void replay(SkCanvasClipVisitor*) const;
-
 #ifdef SK_DEBUG
         /**
          * Dumps the element to SkDebugf. This is intended for Skia development debugging
@@ -252,7 +246,7 @@ public:
         mutable SkTArray<std::unique_ptr<GrUniqueKeyInvalidatedMessage>> fMessages;
 #endif
         Element(int saveCount) {
-            this->initCommon(saveCount, SkClipOp::kReplace_deprecated, false);
+            this->initCommon(saveCount, kReplace_SkClipOp, false);
             this->setEmpty();
         }
 
@@ -567,7 +561,7 @@ private:
     void restoreTo(int saveCount);
 
     inline bool hasClipRestriction(SkClipOp op) {
-        return op >= SkClipOp::kUnion_deprecated && !fClipRestrictionRect.isEmpty();
+        return op >= kUnion_SkClipOp && !fClipRestrictionRect.isEmpty();
     }
 
     /**

@@ -20,7 +20,7 @@
 #include "SkReadBuffer.h"
 #include "SkReader32.h"
 #include "SkRefCnt.h"
-#include "SkShader.h"
+#include "SkShaderBase.h"
 #include "SkTHash.h"
 #include "SkWriteBuffer.h"
 #include "SkXfermodePriv.h"
@@ -130,6 +130,7 @@ public:
     virtual void readColor4f(SkColor4f* color);
     virtual void readPoint(SkPoint* point);
     SkPoint readPoint() { SkPoint p; this->readPoint(&p); return p; }
+    virtual void readPoint3(SkPoint3* point);
     virtual void readMatrix(SkMatrix* matrix);
     virtual void readIRect(SkIRect* rect);
     virtual void readRect(SkRect* rect);
@@ -149,7 +150,7 @@ public:
     sk_sp<SkMaskFilter> readMaskFilter() { return this->readFlattenable<SkMaskFilter>(); }
     sk_sp<SkPathEffect> readPathEffect() { return this->readFlattenable<SkPathEffect>(); }
     sk_sp<SkRasterizer> readRasterizer() { return this->readFlattenable<SkRasterizer>(); }
-    sk_sp<SkShader> readShader() { return this->readFlattenable<SkShader>(); }
+    sk_sp<SkShader> readShader() { return this->readFlattenable<SkShaderBase>(); }
     sk_sp<SkXfermode> readXfermode() { return this->readFlattenable<SkXfermode>(); }
 
     // binary data and arrays

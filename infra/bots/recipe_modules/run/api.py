@@ -12,6 +12,8 @@ from recipe_engine import recipe_api
 BUILD_PRODUCTS_ISOLATE_WHITELIST = [
   'dm',
   'dm.exe',
+  'dm.app',
+  'nanobench.app',
   'get_images_from_skps',
   'get_images_from_skps.exe',
   'nanobench',
@@ -58,7 +60,7 @@ class SkiaStepApi(recipe_api.RecipeApi):
 
   def readfile(self, filename, *args, **kwargs):
     """Convenience function for reading files."""
-    name = kwargs.pop('name') or 'read %s' % self.m.path.basename(filename)
+    name = kwargs.pop('name', 'read %s' % self.m.path.basename(filename))
     return self.m.file.read(name, filename, infra_step=True, *args, **kwargs)
 
   def writefile(self, filename, contents):
@@ -68,10 +70,9 @@ class SkiaStepApi(recipe_api.RecipeApi):
 
   def rmtree(self, path):
     """Wrapper around api.file.rmtree with environment fix."""
-    env = self.m.step.get_from_context('env', {})
-    env['PYTHONPATH'] = str(self.m.path['start_dir'].join(
-        'skia', 'infra', 'bots', '.recipe_deps', 'build', 'scripts'))
-    with self.m.step.context({'env': env}):
+    env = {'PYTHONPATH': str(self.m.path['start_dir'].join(
+        'skia', 'infra', 'bots', '.recipe_deps', 'build', 'scripts'))}
+    with self.m.env(env):
       self.m.file.rmtree(self.m.path.basename(path),
                          path,
                          infra_step=True)
@@ -79,16 +80,14 @@ class SkiaStepApi(recipe_api.RecipeApi):
   def __call__(self, steptype, name, abort_on_failure=True,
                fail_build_on_failure=True, **kwargs):
     """Run a step. If it fails, keep going but mark the build status failed."""
-    env = self.m.step.get_from_context('env', {})
-    env.update(self.m.vars.default_env)
     try:
-      with self.m.step.context({'env': env}):
+      with self.m.env(self.m.vars.default_env):
         return steptype(name=name, **kwargs)
     except self.m.step.StepFailure as e:
       if abort_on_failure or fail_build_on_failure:
         self._failed.append(e)
       if abort_on_failure:
-        raise  # pragma: no cover
+        raise
 
   def copy_build_products(self, src, dst):
     """Copy whitelisted build products from src to dst."""

@@ -137,24 +137,6 @@ void SkColorMatrixFilterRowMajor255::filterSpan(const SkPMColor src[], int count
     filter_span<SkPMColorAdaptor>(fTranspose, src, count, dst);
 }
 
-struct SkPM4fAdaptor {
-    enum {
-        R = SkPM4f::R,
-        G = SkPM4f::G,
-        B = SkPM4f::B,
-        A = SkPM4f::A,
-    };
-    static SkPM4f From4f(const Sk4f& c4) {
-        return SkPM4f::From4f(c4);
-    }
-    static Sk4f To4f(const SkPM4f& c) {
-        return c.to4f();
-    }
-};
-void SkColorMatrixFilterRowMajor255::filterSpan4f(const SkPM4f src[], int count, SkPM4f dst[]) const {
-    filter_span<SkPM4fAdaptor>(fTranspose, src, count, dst);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 void SkColorMatrixFilterRowMajor255::flatten(SkWriteBuffer& buffer) const {
@@ -231,7 +213,7 @@ static void set_concat(SkScalar result[20], const SkScalar outer[20], const SkSc
 //  End duplication
 //////
 
-bool SkColorMatrixFilterRowMajor255::onAppendStages(SkRasterPipeline* p,
+void SkColorMatrixFilterRowMajor255::onAppendStages(SkRasterPipeline* p,
                                                     SkColorSpace* dst,
                                                     SkArenaAlloc* scratch,
                                                     bool shaderIsOpaque) const {
@@ -254,7 +236,6 @@ bool SkColorMatrixFilterRowMajor255::onAppendStages(SkRasterPipeline* p,
     if (!willStayOpaque) { p->append(SkRasterPipeline::premul); }
     if (    needsClamp0) { p->append(SkRasterPipeline::clamp_0); }
     if (    needsClamp1) { p->append(SkRasterPipeline::clamp_a); }
-    return true;
 }
 
 sk_sp<SkColorFilter>
@@ -320,7 +301,7 @@ public:
 
     protected:
         void onSetData(const GrGLSLProgramDataManager& uniManager,
-                       const GrProcessor& proc) override {
+                       const GrFragmentProcessor& proc) override {
             const ColorMatrixEffect& cme = proc.cast<ColorMatrixEffect>();
             const float* m = cme.fMatrix;
             // The GL matrix is transposed from SkColorMatrix.

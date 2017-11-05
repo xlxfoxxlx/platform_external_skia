@@ -329,8 +329,12 @@ static void gather_uninteresting_hashes() {
                  FLAGS_uninterestingHashesFile[0]);
             return;
         }
+
+        // Copy to a string to make sure SkStrSplit has a terminating \0 to find.
+        SkString contents((const char*)data->data(), data->size());
+
         SkTArray<SkString> hashes;
-        SkStrSplit((const char*)data->data(), kNewline, &hashes);
+        SkStrSplit(contents.c_str(), kNewline, &hashes);
         for (const SkString& hash : hashes) {
             gUninterestingHashes.add(hash);
         }
@@ -599,8 +603,12 @@ static void push_codec_srcs(Path path) {
     {
         std::vector<SkCodec::FrameInfo> frameInfos = codec->getFrameInfo();
         if (frameInfos.size() > 1) {
-            push_codec_src(path, CodecSrc::kAnimated_Mode, CodecSrc::kGetFromCanvas_DstColorType,
-                           kPremul_SkAlphaType, 1.0f);
+            for (auto dstCT : { CodecSrc::kNonNative8888_Always_DstColorType,
+                    CodecSrc::kGetFromCanvas_DstColorType }) {
+                for (auto at : { kUnpremul_SkAlphaType, kPremul_SkAlphaType }) {
+                    push_codec_src(path, CodecSrc::kAnimated_Mode, dstCT, at, 1.0f);
+                }
+            }
         }
 
     }
@@ -1029,6 +1037,8 @@ static bool dump_png(SkBitmap bitmap, const char* path, const char* md5) {
     png_set_IHDR(png, info, (png_uint_32)w, (png_uint_32)h, 8,
                  PNG_COLOR_TYPE_RGB_ALPHA, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_set_filter(png,  PNG_FILTER_TYPE_BASE, PNG_FILTER_NONE);
+    png_set_compression_level(png, 1);
     png_write_info(png, info);
     for (int j = 0; j < h; j++) {
         png_bytep row = (png_bytep)(rgba + w*j);
@@ -1106,9 +1116,6 @@ struct Task {
             gDefinitelyThreadSafeWork.add([task,name,bitmap,data]{
                 std::unique_ptr<SkStreamAsset> ownedData(data);
 
-                // Why doesn't the copy constructor do this when we have pre-locked pixels?
-                bitmap.lockPixels();
-
                 SkString md5;
                 if (!FLAGS_writePath.isEmpty() || !FLAGS_readPath.isEmpty()) {
                     SkMD5 hash;
@@ -1122,7 +1129,8 @@ struct Task {
                         // We might consider promoting 565 to RGBA too.
                         if (bitmap.colorType() == kBGRA_8888_SkColorType) {
                             SkBitmap swizzle;
-                            SkAssertResult(bitmap.copyTo(&swizzle, kRGBA_8888_SkColorType));
+                            SkAssertResult(sk_tool_utils::copy_to(&swizzle, kRGBA_8888_SkColorType,
+                                                                  bitmap));
                             hash.write(swizzle.getPixels(), swizzle.getSize());
                         } else {
                             hash.write(bitmap.getPixels(), bitmap.getSize());
@@ -1286,9 +1294,11 @@ static void run_test(skiatest::Test test, const GrContextOptions& grCtxOptions) 
 
 DEFINE_int32(status_sec, 15, "Print status this often (and if we crash).");
 
+static std::atomic<bool> gStopStatusThread{false};
+
 SkThread* start_status_thread() {
     auto thread = new SkThread([] (void*) {
-        for (;;) {
+        while (!gStopStatusThread.load()) {
             print_status();
         #if defined(SK_BUILD_FOR_WIN)
             Sleep(FLAGS_status_sec * 1000);
@@ -1421,6 +1431,13 @@ int main(int argc, char** argv) {
 #ifdef SK_PDF_IMAGE_STATS
     SkPDFImageDumpStats();
 #endif  // SK_PDF_IMAGE_STATS
+
+    // An experiment to work around problems with libmobiledevice driving DM.
+    // Make sure the status thread has stopped completely before we exit.
+#if defined(SK_BUILD_FOR_IOS)
+    gStopStatusThread.store(true);
+    statusThread->join();
+#endif
 
     print_status();
     SkGraphics::PurgeAllCaches();

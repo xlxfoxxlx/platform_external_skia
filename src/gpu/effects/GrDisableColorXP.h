@@ -24,16 +24,17 @@ public:
 private:
     constexpr GrDisableColorXPFactory() {}
 
-    bool willReadDstInShader(const GrCaps&, const FragmentProcessorAnalysis&) const override {
-        return false;
+    AnalysisProperties analysisProperties(const GrProcessorAnalysisColor&,
+                                          const GrProcessorAnalysisCoverage&,
+                                          const GrCaps&) const override {
+        return AnalysisProperties::kCompatibleWithAlphaAsCoverage |
+               AnalysisProperties::kIgnoresInputColor;
     }
 
-    bool compatibleWithCoverageAsAlpha(bool colorIsOpaque) const override { return true; }
-
-    GrXferProcessor* onCreateXferProcessor(const GrCaps& caps,
-                                           const FragmentProcessorAnalysis&,
-                                           bool hasMixedSamples,
-                                           const DstTexture* dstTexture) const override;
+    sk_sp<const GrXferProcessor> makeXferProcessor(const GrProcessorAnalysisColor&,
+                                                   GrProcessorAnalysisCoverage,
+                                                   bool hasMixedSamples,
+                                                   const GrCaps&) const override;
 
     GR_DECLARE_XP_FACTORY_TEST;
 

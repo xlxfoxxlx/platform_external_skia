@@ -17,13 +17,11 @@
 #include "SkColorMatrixFilterRowMajor255.h"
 #include "SkComposeImageFilter.h"
 #include "SkCornerPathEffect.h"
-#include "SkDashPathEffect.h"
+#include "../../src/effects/SkDashImpl.h"
 #include "SkDiscretePathEffect.h"
 #include "SkDisplacementMapEffect.h"
 #include "SkDropShadowImageFilter.h"
 #include "../../src/effects/SkEmbossMaskFilter.h"
-#include "SkGaussianEdgeShader.h"
-#include "SkRRectsGaussianEdgeMaskFilter.h"
 #include "SkGradientShader.h"
 #include "SkHighContrastFilter.h"
 #include "SkImageSource.h"
@@ -43,6 +41,7 @@
 #include "SkPaintImageFilter.h"
 #include "SkPerlinNoiseShader.h"
 #include "SkPictureImageFilter.h"
+#include "SkRRectsGaussianEdgeMaskFilter.h"
 #include "SkTableColorFilter.h"
 #include "SkTileImageFilter.h"
 #include "SkXfermodeImageFilter.h"
@@ -88,16 +87,15 @@ void SkFlattenable::PrivateInitializer::InitEffects() {
     SkHighContrastFilter::InitializeFlattenables();
 
     // Shader
-    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkPerlinNoiseShader)
+    SkPerlinNoiseShader::InitializeFlattenables();
     SkGradientShader::InitializeFlattenables();
     SkLightingShader::InitializeFlattenables();
     SkNormalSource::InitializeFlattenables();
-    SkGaussianEdgeShader::InitializeFlattenables();
 
     // PathEffect
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkArcToPathEffect)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkCornerPathEffect)
-    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkDashPathEffect)
+    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkDashImpl)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkDiscretePathEffect)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkPath1DPathEffect)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkLine2DPathEffect)

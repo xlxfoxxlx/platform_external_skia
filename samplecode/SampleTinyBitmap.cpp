@@ -19,22 +19,18 @@ static SkBitmap make_bitmap() {
     for (int i = 0; i < N; i++) {
         c[i] = SkPackARGB32(0x80, 0x80, 0, 0);
     }
-    SkColorTable* ctable = new SkColorTable(c, N);
 
     SkBitmap bm;
     bm.allocPixels(SkImageInfo::Make(1, 1, kIndex_8_SkColorType,
                                      kPremul_SkAlphaType),
-                   nullptr, ctable);
-    ctable->unref();
+                   SkColorTable::Make(c, N));
 
-    bm.lockPixels();
     for (int y = 0; y < bm.height(); y++) {
         uint8_t* p = bm.getAddr8(0, y);
         for (int x = 0; x < bm.width(); x++) {
             p[x] = 0;
         }
     }
-    bm.unlockPixels();
     return bm;
 }
 
@@ -56,7 +52,6 @@ protected:
     }
 
     static void setBitmapOpaque(SkBitmap* bm, bool isOpaque) {
-        SkAutoLockPixels alp(*bm);  // needed for ctable
         bm->setAlphaType(isOpaque ? kOpaque_SkAlphaType : kPremul_SkAlphaType);
     }
 

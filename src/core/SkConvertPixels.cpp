@@ -16,6 +16,7 @@
 #include "SkRasterPipeline.h"
 #include "SkUnPreMultiply.h"
 #include "SkUnPreMultiplyPriv.h"
+#include "../jumper/SkJumper.h"
 
 // Fast Path 1: The memcpy() case.
 static inline bool can_memcpy(const SkImageInfo& dstInfo, const SkImageInfo& srcInfo) {
@@ -276,7 +277,7 @@ static void convert_to_alpha8(uint8_t* dst, size_t dstRB, const SkImageInfo& src
 static void convert_with_pipeline(const SkImageInfo& dstInfo, void* dstRow, size_t dstRB,
                                   const SkImageInfo& srcInfo, const void* srcRow, size_t srcRB,
                                   bool isColorAware, SkTransferFunctionBehavior behavior) {
-    SkRasterPipeline pipeline;
+    SkRasterPipeline_<256> pipeline;
     switch (srcInfo.colorType()) {
         case kRGBA_8888_SkColorType:
             pipeline.append(SkRasterPipeline::load_8888, &srcRow);
@@ -308,14 +309,20 @@ static void convert_with_pipeline(const SkImageInfo& dstInfo, void* dstRow, size
         premulState = kUnpremul_SkAlphaType;
     }
 
+    SkColorSpaceTransferFn srcFn;
     if (isColorAware && srcInfo.gammaCloseToSRGB()) {
         pipeline.append_from_srgb(srcInfo.alphaType());
+    } else if (isColorAware && !srcInfo.colorSpace()->gammaIsLinear()) {
+        SkAssertResult(srcInfo.colorSpace()->isNumericalTransferFn(&srcFn));
+        pipeline.append(SkRasterPipeline::parametric_r, &srcFn);
+        pipeline.append(SkRasterPipeline::parametric_g, &srcFn);
+        pipeline.append(SkRasterPipeline::parametric_b, &srcFn);
     }
 
     float matrix[12];
     if (isColorAware) {
-        SkAssertResult(append_gamut_transform(&pipeline, matrix, srcInfo.colorSpace(),
-                                              dstInfo.colorSpace()));
+        append_gamut_transform(&pipeline, matrix, srcInfo.colorSpace(), dstInfo.colorSpace(),
+                               premulState);
     }
 
     SkAlphaType dat = dstInfo.alphaType();
@@ -329,8 +336,15 @@ static void convert_with_pipeline(const SkImageInfo& dstInfo, void* dstRow, size
         }
     }
 
+    SkColorSpaceTransferFn dstFn;
     if (isColorAware && dstInfo.gammaCloseToSRGB()) {
         pipeline.append(SkRasterPipeline::to_srgb);
+    } else if (isColorAware && !dstInfo.colorSpace()->gammaIsLinear()) {
+        SkAssertResult(dstInfo.colorSpace()->isNumericalTransferFn(&dstFn));
+        dstFn = dstFn.invert();
+        pipeline.append(SkRasterPipeline::parametric_r, &dstFn);
+        pipeline.append(SkRasterPipeline::parametric_g, &dstFn);
+        pipeline.append(SkRasterPipeline::parametric_b, &dstFn);
     }
 
     if (kUnpremul_SkAlphaType == premulState && kPremul_SkAlphaType == dat &&
@@ -343,6 +357,19 @@ static void convert_with_pipeline(const SkImageInfo& dstInfo, void* dstRow, size
     // The final premul state must equal the dst alpha type.  Note that if we are "converting"
     // opaque to another alpha type, there's no need to worry about multiplication.
     SkASSERT(premulState == dat || kOpaque_SkAlphaType == srcInfo.alphaType());
+
+    // We'll dither if we're decreasing precision below 32-bit.
+    float dither_rate = 0.0f;
+    if (srcInfo.bytesPerPixel() > dstInfo.bytesPerPixel()) {
+        switch (dstInfo.colorType()) {
+            case   kRGB_565_SkColorType: dither_rate = 1/63.0f; break;
+            case kARGB_4444_SkColorType: dither_rate = 1/15.0f; break;
+            default:                     dither_rate =    0.0f; break;
+        }
+    }
+    if (dither_rate > 0) {
+        pipeline.append(SkRasterPipeline::dither, &dither_rate);
+    }
 
     switch (dstInfo.colorType()) {
         case kRGBA_8888_SkColorType:
@@ -366,8 +393,9 @@ static void convert_with_pipeline(const SkImageInfo& dstInfo, void* dstRow, size
             break;
     }
 
+    auto run = pipeline.compile();
     for (int y = 0; y < srcInfo.height(); ++y) {
-        pipeline.run(0,srcInfo.width());
+        run(0,y, srcInfo.width());
         // The pipeline has pointers to srcRow and dstRow, so we just need to update them in the
         // loop to move between rows of src/dst.
         dstRow = SkTAddOffset<void>(dstRow, dstRB);

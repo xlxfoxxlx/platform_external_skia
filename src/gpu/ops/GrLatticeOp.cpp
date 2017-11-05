@@ -21,7 +21,7 @@ static sk_sp<GrGeometryProcessor> create_gp() {
                                          LocalCoords::kHasExplicit_Type, SkMatrix::I());
 }
 
-class NonAALatticeOp final : public GrMeshDrawOp {
+class NonAALatticeOp final : public GrLegacyMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
 
@@ -61,13 +61,13 @@ public:
     }
 
 private:
-    void getFragmentProcessorAnalysisInputs(GrPipelineAnalysisColor* color,
-                                            GrPipelineAnalysisCoverage* coverage) const override {
+    void getProcessorAnalysisInputs(GrProcessorAnalysisColor* color,
+                                    GrProcessorAnalysisCoverage* coverage) const override {
         color->setToUnknown();
-        *coverage = GrPipelineAnalysisCoverage::kNone;
+        *coverage = GrProcessorAnalysisCoverage::kNone;
     }
 
-    void applyPipelineOptimizations(const GrPipelineOptimizations& analysioptimizations) override {
+    void applyPipelineOptimizations(const PipelineOptimizations& analysioptimizations) override {
         analysioptimizations.getOverrideColorIfSet(&fPatches[0].fColor);
     }
 
@@ -86,9 +86,9 @@ private:
         }
 
         sk_sp<const GrBuffer> indexBuffer(target->resourceProvider()->refQuadIndexBuffer());
-        InstancedHelper helper;
-        void* vertices = helper.init(target, kTriangles_GrPrimitiveType, vertexStride,
-                                     indexBuffer.get(), kVertsPerRect, kIndicesPerRect, numRects);
+        PatternHelper helper(kTriangles_GrPrimitiveType);
+        void* vertices = helper.init(target, vertexStride, indexBuffer.get(), kVertsPerRect,
+                                     kIndicesPerRect, numRects);
         if (!vertices || !indexBuffer) {
             SkDebugf("Could not allocate vertices\n");
             return;
@@ -133,7 +133,7 @@ private:
                         positions, vertexStride, kVertsPerRect * patch.fIter->numRectsToDraw());
             }
         }
-        helper.recordDraw(target, gp.get());
+        helper.recordDraw(target, gp.get(), this->pipeline());
     }
 
     bool onCombineIfPossible(GrOp* t, const GrCaps& caps) override {
@@ -162,14 +162,15 @@ private:
     int fImageHeight;
     SkSTArray<1, Patch, true> fPatches;
 
-    typedef GrMeshDrawOp INHERITED;
+    typedef GrLegacyMeshDrawOp INHERITED;
 };
 
 namespace GrLatticeOp {
-std::unique_ptr<GrMeshDrawOp> MakeNonAA(GrColor color, const SkMatrix& viewMatrix, int imageWidth,
-                                        int imageHeight, std::unique_ptr<SkLatticeIter> iter,
-                                        const SkRect& dst) {
-    return std::unique_ptr<GrMeshDrawOp>(
+std::unique_ptr<GrLegacyMeshDrawOp> MakeNonAA(GrColor color, const SkMatrix& viewMatrix,
+                                              int imageWidth, int imageHeight,
+                                              std::unique_ptr<SkLatticeIter> iter,
+                                              const SkRect& dst) {
+    return std::unique_ptr<GrLegacyMeshDrawOp>(
             new NonAALatticeOp(color, viewMatrix, imageWidth, imageHeight, std::move(iter), dst));
 }
 };

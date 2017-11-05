@@ -12,6 +12,7 @@
 #include "SkData.h"
 #include "SkDraw.h"
 #include "SkFontDescriptor.h"
+#include "SkGraphics.h"
 #include "SkGlyphCache.h"
 #include "SkImageFilter.h"
 #include "SkMaskFilter.h"
@@ -26,6 +27,7 @@
 #include "SkScalar.h"
 #include "SkScalerContext.h"
 #include "SkShader.h"
+#include "SkShaderBase.h"
 #include "SkStringUtils.h"
 #include "SkStroke.h"
 #include "SkStrokeRec.h"
@@ -391,6 +393,12 @@ bool SkPaint::TooBigToUseCache(const SkMatrix& ctm, const SkMatrix& textM) {
     return tooBig(matrix, MaxCacheSize2());
 }
 
+SkScalar SkPaint::MaxCacheSize2() {
+    // we have a self-imposed maximum, just for memory-usage sanity
+    const int limit = SkMin32(SkGraphics::GetFontCachePointSizeLimit(), 1024);
+    const SkScalar maxSize = SkIntToScalar(limit);
+    return maxSize * maxSize;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1250,7 +1258,7 @@ static SkPaint::Hinting computeHinting(const SkPaint& paint) {
 static bool justAColor(const SkPaint& paint, SkColor* color) {
     SkColor c = paint.getColor();
 
-    SkShader* shader = paint.getShader();
+    const auto* shader = as_SB(paint.getShader());
     if (shader && !shader->asLuminanceColor(&c)) {
         return false;
     }
@@ -2071,8 +2079,7 @@ void SkPaint::toString(SkString* str) const {
         str->append("</dd>");
     }
 
-    SkShader* shader = this->getShader();
-    if (shader) {
+    if (const auto* shader = as_SB(this->getShader())) {
         str->append("<dt>Shader:</dt><dd>");
         shader->toString(str);
         str->append("</dd>");

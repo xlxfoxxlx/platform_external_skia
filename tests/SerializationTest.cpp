@@ -18,6 +18,7 @@
 #include "SkNormalSource.h"
 #include "SkOSFile.h"
 #include "SkPictureRecorder.h"
+#include "SkShaderBase.h"
 #include "SkTableColorFilter.h"
 #include "SkTemplates.h"
 #include "SkTypeface.h"
@@ -318,8 +319,6 @@ static void compare_bitmaps(skiatest::Reporter* reporter,
                             const SkBitmap& b1, const SkBitmap& b2) {
     REPORTER_ASSERT(reporter, b1.width() == b2.width());
     REPORTER_ASSERT(reporter, b1.height() == b2.height());
-    SkAutoLockPixels autoLockPixels1(b1);
-    SkAutoLockPixels autoLockPixels2(b2);
 
     if ((b1.width() != b2.width()) ||
         (b1.height() != b2.height())) {
@@ -440,7 +439,7 @@ static void draw_something(SkCanvas* canvas) {
     canvas->drawCircle(SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/3), paint);
     paint.setColor(SK_ColorBLACK);
     paint.setTextSize(SkIntToScalar(kBitmapSize/3));
-    canvas->drawText("Picture", 7, SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), paint);
+    canvas->drawString("Picture", SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), paint);
 }
 
 DEF_TEST(Serialization, reporter) {
@@ -612,32 +611,22 @@ DEF_TEST(Serialization, reporter) {
         sk_sp<SkShader> lightingShader = SkLightingShader::Make(diffuseShader,
                                                                 normalSource,
                                                                 fLights);
-        sk_sp<SkShader>(TestFlattenableSerialization(lightingShader.get(), true, reporter));
+        sk_sp<SkShader>(TestFlattenableSerialization(as_SB(lightingShader.get()), true, reporter));
 
         lightingShader = SkLightingShader::Make(std::move(diffuseShader),
                                                 nullptr,
                                                 fLights);
-        sk_sp<SkShader>(TestFlattenableSerialization(lightingShader.get(), true, reporter));
+        sk_sp<SkShader>(TestFlattenableSerialization(as_SB(lightingShader.get()), true, reporter));
 
         lightingShader = SkLightingShader::Make(nullptr,
                                                 std::move(normalSource),
                                                 fLights);
-        sk_sp<SkShader>(TestFlattenableSerialization(lightingShader.get(), true, reporter));
+        sk_sp<SkShader>(TestFlattenableSerialization(as_SB(lightingShader.get()), true, reporter));
 
         lightingShader = SkLightingShader::Make(nullptr,
                                                 nullptr,
                                                 fLights);
-        sk_sp<SkShader>(TestFlattenableSerialization(lightingShader.get(), true, reporter));
-    }
-
-    // Test NormalBevelSource serialization
-    {
-        sk_sp<SkNormalSource> bevelSource = SkNormalSource::MakeBevel(
-                SkNormalSource::BevelType::kLinear, 2.0f, 5.0f);
-
-        sk_sp<SkNormalSource>(TestFlattenableSerialization(bevelSource.get(), true, reporter));
-        // TODO test equality?
-
+        sk_sp<SkShader>(TestFlattenableSerialization(as_SB(lightingShader.get()), true, reporter));
     }
 }
 

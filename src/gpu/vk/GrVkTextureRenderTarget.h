@@ -26,9 +26,9 @@ struct GrVkImageInfo;
 
 class GrVkTextureRenderTarget: public GrVkTexture, public GrVkRenderTarget {
 public:
-    static GrVkTextureRenderTarget* CreateNewTextureRenderTarget(GrVkGpu*, SkBudgeted,
-                                                                 const GrSurfaceDesc&,
-                                                                 const GrVkImage::ImageDesc&);
+    static sk_sp<GrVkTextureRenderTarget> CreateNewTextureRenderTarget(GrVkGpu*, SkBudgeted,
+                                                                       const GrSurfaceDesc&,
+                                                                       const GrVkImage::ImageDesc&);
 
     static sk_sp<GrVkTextureRenderTarget> MakeWrappedTextureRenderTarget(GrVkGpu*,
                                                                          const GrSurfaceDesc&,
@@ -106,16 +106,18 @@ private:
         this->registerWithCacheWrapped();
     }
 
-    static GrVkTextureRenderTarget* Create(GrVkGpu*,
-                                           const GrSurfaceDesc&,
-                                           const GrVkImageInfo&,
-                                           SkBudgeted budgeted,
-                                           GrVkImage::Wrapped wrapped);
+    static sk_sp<GrVkTextureRenderTarget> Make(GrVkGpu*,
+                                               const GrSurfaceDesc&,
+                                               const GrVkImageInfo&,
+                                               SkBudgeted budgeted,
+                                               GrVkImage::Wrapped wrapped);
 
     // GrGLRenderTarget accounts for the texture's memory and any MSAA renderbuffer's memory.
     size_t onGpuMemorySize() const override {
         // The plus 1 is to account for the resolve texture.
-        return GrSurface::ComputeSize(fDesc, fDesc.fSampleCnt+1,      // TODO: this still correct?
+        int numColorSamples = this->numColorSamples() + 1;
+        return GrSurface::ComputeSize(this->config(), this->width(), this->height(),
+                                      numColorSamples,  // TODO: this still correct?
                                       this->texturePriv().hasMipMaps());
     }
 };

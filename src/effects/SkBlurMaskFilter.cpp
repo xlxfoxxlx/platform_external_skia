@@ -14,6 +14,7 @@
 #include "SkRRect.h"
 #include "SkStringUtils.h"
 #include "SkStrokeRec.h"
+#include "SkVertices.h"
 
 #if SK_SUPPORT_GPU
 #include "GrCircleBlurFragmentProcessor.h"
@@ -844,7 +845,7 @@ public:
     static void GenKey(const GrProcessor&, const GrShaderCaps&, GrProcessorKeyBuilder* b);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     typedef GrGLSLProgramDataManager::UniformHandle UniformHandle;
@@ -935,7 +936,7 @@ void GrGLRectBlurEffect::emitCode(EmitArgs& args) {
 }
 
 void GrGLRectBlurEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                   const GrProcessor& proc) {
+                                   const GrFragmentProcessor& proc) {
     const GrRectBlurEffect& rbe = proc.cast<GrRectBlurEffect>();
     SkRect rect = rbe.getRect();
 
@@ -1036,7 +1037,7 @@ bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrContext* context,
 
     SkScalar xformedSigma = this->computeXformedSigma(viewMatrix);
 
-    GrResourceProvider* resourceProvider = renderTargetContext->resourceProvider();
+    GrResourceProvider* resourceProvider = context->resourceProvider();
     sk_sp<GrFragmentProcessor> fp;
 
     SkRect rect;
@@ -1249,7 +1250,7 @@ public:
     void emitCode(EmitArgs&) override;
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fProxyRectUniform;
@@ -1315,7 +1316,7 @@ void GrGLRRectBlurEffect::emitCode(EmitArgs& args) {
 }
 
 void GrGLRRectBlurEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                    const GrProcessor& proc) {
+                                    const GrFragmentProcessor& proc) {
     const GrRRectBlurEffect& brre = proc.cast<GrRRectBlurEffect>();
     const SkRRect& rrect = brre.getRRect();
 
@@ -1359,14 +1360,10 @@ bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrContext* context,
         return false;
     }
 
-    GrResourceProvider* resourceProvider = renderTargetContext->resourceProvider();
+    GrResourceProvider* resourceProvider = context->resourceProvider();
     SkScalar xformedSigma = this->computeXformedSigma(viewMatrix);
 
     if (devRRect.isRect() || devRRect.isCircle()) {
-        if (this->ignoreXform()) {
-            return false;
-        }
-
         sk_sp<GrFragmentProcessor> fp;
         if (devRRect.isRect()) {
             SkScalar pad = 3.0f * xformedSigma;
@@ -1381,11 +1378,19 @@ bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrContext* context,
         if (!fp) {
             return false;
         }
-
         paint.addCoverageFragmentProcessor(std::move(fp));
 
         SkRect srcProxyRect = srcRRect.rect();
-        srcProxyRect.outset(3.0f*fSigma, 3.0f*fSigma);
+        SkScalar outsetX = 3.0f*fSigma;
+        SkScalar outsetY = 3.0f*fSigma;
+        if (this->ignoreXform()) {
+            // When we're ignoring the CTM the padding added to the source rect also needs to ignore
+            // the CTM. The matrix passed in here is guaranteed to be just scale and translate so we
+            // can just grab the X and Y scales off the matrix and pre-undo the scale.
+            outsetX /= viewMatrix.getScaleX();
+            outsetY /= viewMatrix.getScaleY();
+        }
+        srcProxyRect.outset(outsetX, outsetY);
 
         renderTargetContext->drawRect(clip, std::move(paint), GrAA::kNo, viewMatrix, srcProxyRect);
         return true;
@@ -1401,38 +1406,32 @@ bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrContext* context,
         SkRect srcProxyRect = srcRRect.rect();
         srcProxyRect.outset(3.0f*fSigma, 3.0f*fSigma);
 
-        SkPoint points[8];
-        uint16_t indices[24];
-        int numPoints, numIndices;
-
+        sk_sp<SkVertices> vertices = nullptr;
         SkRect temp = fOccluder;
 
         if (!temp.isEmpty() && (srcProxyRect.contains(temp) || temp.intersect(srcProxyRect))) {
-            srcProxyRect.toQuad(points);
-            temp.toQuad(&points[4]);
-            numPoints = 8;
+            SkVertices::Builder builder(SkVertices::kTriangles_VertexMode, 8, 24, 0);
+            srcProxyRect.toQuad(builder.positions());
+            temp.toQuad(builder.positions() + 4);
 
             static const uint16_t ringI[24] = { 0, 1, 5, 5, 4, 0,
                                                 1, 2, 6, 6, 5, 1,
                                                 2, 3, 7, 7, 6, 2,
                                                 3, 0, 4, 4, 7, 3 };
-            memcpy(indices, ringI, sizeof(ringI));
-            numIndices = 24;
+            memcpy(builder.indices(), ringI, sizeof(ringI));
+            vertices = builder.detach();
         } else {
             // full rect case
-            srcProxyRect.toQuad(points);
-            numPoints = 4;
+            SkVertices::Builder builder(SkVertices::kTriangles_VertexMode, 4, 6, 0);
+            srcProxyRect.toQuad(builder.positions());
 
             static const uint16_t fullI[6] = { 0, 1, 2, 0, 2, 3 };
-            memcpy(indices, fullI, sizeof(fullI));
-            numIndices = 6;
+            memcpy(builder.indices(), fullI, sizeof(fullI));
+            vertices = builder.detach();
         }
 
         paint.addCoverageFragmentProcessor(std::move(fp));
-        renderTargetContext->drawVertices(clip, std::move(paint), viewMatrix,
-                                          kTriangles_GrPrimitiveType, numPoints, points, nullptr,
-                                          nullptr, indices, numIndices);
-
+        renderTargetContext->drawVertices(clip, std::move(paint), viewMatrix, std::move(vertices));
     } else {
         SkMatrix inverse;
         if (!viewMatrix.invert(&inverse)) {

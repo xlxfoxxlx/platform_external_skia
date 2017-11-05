@@ -8,7 +8,7 @@
 #include "GrFragmentProcessor.h"
 #include "GrCoordTransform.h"
 #include "GrPipeline.h"
-#include "GrPipelineAnalysis.h"
+#include "GrProcessorAnalysis.h"
 #include "effects/GrConstColorProcessor.h"
 #include "effects/GrXfermodeFragmentProcessor.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
@@ -61,14 +61,25 @@ void GrFragmentProcessor::addCoordTransform(const GrCoordTransform* transform) {
     SkDEBUGCODE(transform->setInProcessor();)
 }
 
+bool GrFragmentProcessor::instantiate(GrResourceProvider* resourceProvider) const {
+    if (!INHERITED::instantiate(resourceProvider)) {
+        return false;
+    }
+
+    for (int i = 0; i < this->numChildProcessors(); ++i) {
+        if (!this->childProcessor(i).instantiate(resourceProvider)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 int GrFragmentProcessor::registerChildProcessor(sk_sp<GrFragmentProcessor> child) {
     this->combineRequiredFeatures(*child);
 
     if (child->usesLocalCoords()) {
         fFlags |= kUsesLocalCoords_Flag;
-    }
-    if (child->usesDistanceVectorField()) {
-        fFlags |= kUsesDistanceVectorField_Flag;
     }
 
     int index = fChildProcessors.count();
@@ -283,7 +294,7 @@ sk_sp<GrFragmentProcessor> GrFragmentProcessor::MakeInputPremulAndMulByOutput(
             public:
                 void emitCode(EmitArgs& args) override {
                     GrGLSLFPFragmentBuilder* fragBuilder = args.fFragBuilder;
-                    this->emitChild(0, nullptr, args);
+                    this->emitChild(0, args);
                     fragBuilder->codeAppendf("%s.rgb *= %s.rgb;", args.fOutputColor,
                                                                 args.fInputColor);
                     fragBuilder->codeAppendf("%s *= %s.a;", args.fOutputColor, args.fInputColor);
@@ -353,7 +364,7 @@ sk_sp<GrFragmentProcessor> GrFragmentProcessor::OverrideInput(sk_sp<GrFragmentPr
 
             private:
                 void onSetData(const GrGLSLProgramDataManager& pdman,
-                               const GrProcessor& fp) override {
+                               const GrFragmentProcessor& fp) override {
                     GrColor4f color = fp.cast<ReplaceInputFragmentProcessor>().fColor;
                     if (!fHaveSetColor || color != fPreviousColor) {
                         pdman.set4fv(fColorUni, 1, color.fRGBA);

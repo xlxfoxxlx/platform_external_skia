@@ -19,10 +19,6 @@ include_dirs = sys.argv[2:]
 
 blacklist = {
   "GrGLConfig_chrome.h",
-  "GrVkBackendContext.h",
-  "GrVkDefines.h",
-  "GrVkInterface.h",
-  "GrVkTypes.h",
   "SkFontMgr_fontconfig.h",
 }
 

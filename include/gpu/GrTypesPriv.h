@@ -51,6 +51,40 @@ static inline bool GrAATypeIsHW(GrAAType type) {
     return false;
 }
 
+/** The type of full scene antialiasing supported by a render target. */
+enum class GrFSAAType {
+    /** No FSAA */
+    kNone,
+    /** Regular MSAA where each attachment has the same sample count. */
+    kUnifiedMSAA,
+    /** One color sample, N stencil samples. */
+    kMixedSamples,
+};
+
+/**
+ * Not all drawing code paths support using mixed samples when available and instead use
+ * coverage-based aa.
+ */
+enum class GrAllowMixedSamples { kNo, kYes };
+
+static inline GrAAType GrChooseAAType(GrAA aa, GrFSAAType fsaaType,
+                                      GrAllowMixedSamples allowMixedSamples) {
+    if (GrAA::kNo == aa) {
+        return GrAAType::kNone;
+    }
+    switch (fsaaType) {
+        case GrFSAAType::kNone:
+            return GrAAType::kCoverage;
+        case GrFSAAType::kUnifiedMSAA:
+            return GrAAType::kMSAA;
+        case GrFSAAType::kMixedSamples:
+            return GrAllowMixedSamples::kYes == allowMixedSamples ? GrAAType::kMixedSamples
+                                                                  : GrAAType::kCoverage;
+    }
+    SkFAIL("Unexpected fsaa type");
+    return GrAAType::kNone;
+}
+
 /**
  * Types of shader-language-specific boxed variables we can create. (Currently only GrGLShaderVars,
  * but should be applicable to other shader languages.)
@@ -98,14 +132,6 @@ enum GrShaderFlags {
 };
 GR_MAKE_BITFIELD_OPS(GrShaderFlags);
 
-enum class GrDrawFace {
-    kInvalid = -1,
-
-    kBoth,
-    kCCW,
-    kCW,
-};
-
 /**
  * Precisions of shader language variables. Not all shading languages support precisions or actually
  * vary the internal precision based on the qualifiers. These currently only apply to float types (
@@ -116,11 +142,14 @@ enum GrSLPrecision {
     kMedium_GrSLPrecision,
     kHigh_GrSLPrecision,
 
-    // Default precision is medium. This is because on OpenGL ES 2 highp support is not
-    // guaranteed. On (non-ES) OpenGL the specifiers have no effect on precision.
-    kDefault_GrSLPrecision = kMedium_GrSLPrecision,
+    // Default precision is a special tag that means "whatever the default for the program/type
+    // combination is". In other words, it maps to the empty string in shader code. There are some
+    // scenarios where kDefault is not allowed (as the default precision for a program, or for
+    // varyings, for example).
+    kDefault_GrSLPrecision,
 
-    kLast_GrSLPrecision = kHigh_GrSLPrecision
+    // We only consider the "real" precisions here
+    kLast_GrSLPrecision = kHigh_GrSLPrecision,
 };
 
 static const int kGrSLPrecisionCount = kLast_GrSLPrecision + 1;

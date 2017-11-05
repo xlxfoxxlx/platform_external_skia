@@ -70,20 +70,18 @@ public:
     bool getAllowSRGBInputs() const { return fAllowSRGBInputs; }
 
     /**
-     * Does one of the fragment processors need a field of distance vectors to the nearest edge?
-     */
-    bool usesDistanceVectorField() const { return fUsesDistanceVectorField; }
-
-    /**
      * Should rendering be gamma-correct, end-to-end. Causes sRGB render targets to behave
      * as such (with linear blending), and sRGB inputs to be filtered and decoded correctly.
      */
     void setGammaCorrect(bool gammaCorrect) {
-        setDisableOutputConversionToSRGB(!gammaCorrect);
-        setAllowSRGBInputs(gammaCorrect);
+        this->setDisableOutputConversionToSRGB(!gammaCorrect);
+        this->setAllowSRGBInputs(gammaCorrect);
     }
 
-    void setXPFactory(const GrXPFactory* xpFactory) { fXPFactory = xpFactory; }
+    void setXPFactory(const GrXPFactory* xpFactory) {
+        fXPFactory = xpFactory;
+        fTrivial &= !SkToBool(xpFactory);
+    }
 
     void setPorterDuffXPFactory(SkBlendMode mode);
 
@@ -94,8 +92,8 @@ public:
      */
     void addColorFragmentProcessor(sk_sp<GrFragmentProcessor> fp) {
         SkASSERT(fp);
-        fUsesDistanceVectorField |= fp->usesDistanceVectorField();
         fColorFragmentProcessors.push_back(std::move(fp));
+        fTrivial = false;
     }
 
     /**
@@ -103,8 +101,8 @@ public:
      */
     void addCoverageFragmentProcessor(sk_sp<GrFragmentProcessor> fp) {
         SkASSERT(fp);
-        fUsesDistanceVectorField |= fp->usesDistanceVectorField();
         fCoverageFragmentProcessors.push_back(std::move(fp));
+        fTrivial = false;
     }
 
     /**
@@ -143,6 +141,12 @@ public:
      */
     bool isConstantBlendedColor(GrColor* constantColor) const;
 
+    /**
+     * A trivial paint is one that uses src-over and has no fragment processors.
+     * It may have variable sRGB settings.
+     **/
+    bool isTrivial() const { return fTrivial; }
+
 private:
     template <bool> class MoveOrImpl;
 
@@ -171,7 +175,7 @@ private:
     SkSTArray<2, sk_sp<GrFragmentProcessor>>  fCoverageFragmentProcessors;
     bool fDisableOutputConversionToSRGB = false;
     bool fAllowSRGBInputs = false;
-    bool fUsesDistanceVectorField = false;
+    bool fTrivial = true;
     GrColor4f fColor = GrColor4f::OpaqueWhite();
 };
 

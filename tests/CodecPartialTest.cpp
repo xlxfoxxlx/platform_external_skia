@@ -280,10 +280,6 @@ DEF_TEST(Codec_partialAnim, r) {
         frameInfo = partialCodec->getFrameInfo();
         REPORTER_ASSERT(r, frameInfo.size() == i + 1);
         REPORTER_ASSERT(r, frameInfo[i].fFullyReceived);
-
-        // allocPixels locked the pixels for frame, but frames[i] was copied
-        // from another bitmap, and did not retain the locked status.
-        SkAutoLockPixels alp(frames[i]);
         compare_bitmaps(r, frames[i], frame);
     }
 }
@@ -410,7 +406,6 @@ DEF_TEST(Codec_emptyIDAT, r) {
     const char* name = "baby_tux.png";
     sk_sp<SkData> file = GetResourceAsData(name);
     if (!file) {
-        SkDebugf("REMOVE\n");
         return;
     }
 

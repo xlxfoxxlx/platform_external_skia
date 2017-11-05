@@ -124,6 +124,12 @@ void SkValidatingReadBuffer::readPoint(SkPoint* point) {
     point->fY = this->readScalar();
 }
 
+void SkValidatingReadBuffer::readPoint3(SkPoint3* point) {
+    point->fX = this->readScalar();
+    point->fY = this->readScalar();
+    point->fZ = this->readScalar();
+}
+
 void SkValidatingReadBuffer::readMatrix(SkMatrix* matrix) {
     size_t size = 0;
     if (!fError) {
@@ -139,6 +145,8 @@ void SkValidatingReadBuffer::readIRect(SkIRect* rect) {
     const void* ptr = this->skip(sizeof(SkIRect));
     if (!fError) {
         memcpy(rect, ptr, sizeof(SkIRect));
+    } else {
+        rect->setEmpty();
     }
 }
 
@@ -146,6 +154,8 @@ void SkValidatingReadBuffer::readRect(SkRect* rect) {
     const void* ptr = this->skip(sizeof(SkRect));
     if (!fError) {
         memcpy(rect, ptr, sizeof(SkRect));
+    } else {
+        rect->setEmpty();
     }
 }
 

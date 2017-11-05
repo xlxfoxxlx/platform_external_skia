@@ -131,7 +131,7 @@ public:
 
     protected:
         void onSetData(const GrGLSLProgramDataManager& pdman,
-                       const GrProcessor& processor) override {
+                       const GrFragmentProcessor& processor) override {
             const YUVtoRGBEffect& yuvEffect = processor.cast<YUVtoRGBEffect>();
             switch (yuvEffect.getColorSpace()) {
                 case kJPEG_SkYUVColorSpace:
@@ -158,10 +158,9 @@ private:
                    sk_sp<GrTextureProxy> vProxy, const SkMatrix yuvMatrix[3],
                    GrSamplerParams::FilterMode uvFilterMode, SkYUVColorSpace colorSpace, bool nv12)
             : INHERITED(kPreservesOpaqueInput_OptimizationFlag)
-            , fYTransform(resourceProvider, yuvMatrix[0], yProxy.get(),
-                          GrSamplerParams::kNone_FilterMode)
+            , fYTransform(resourceProvider, yuvMatrix[0], yProxy.get())
             , fYSampler(resourceProvider, std::move(yProxy))
-            , fUTransform(resourceProvider, yuvMatrix[1], uProxy.get(), uvFilterMode)
+            , fUTransform(resourceProvider, yuvMatrix[1], uProxy.get())
             , fUSampler(resourceProvider, std::move(uProxy), uvFilterMode)
             , fVSampler(resourceProvider, vProxy, uvFilterMode)
             , fColorSpace(colorSpace)
@@ -172,8 +171,7 @@ private:
         this->addCoordTransform(&fUTransform);
         this->addTextureSampler(&fUSampler);
         if (!fNV12) {
-            fVTransform = GrCoordTransform(resourceProvider, yuvMatrix[2], vProxy.get(),
-                                           uvFilterMode);
+            fVTransform = GrCoordTransform(resourceProvider, yuvMatrix[2], vProxy.get());
             this->addCoordTransform(&fVTransform);
             this->addTextureSampler(&fVSampler);
         }
@@ -287,7 +285,7 @@ public:
 
     private:
         void onSetData(const GrGLSLProgramDataManager& pdman,
-                       const GrProcessor& processor) override {
+                       const GrFragmentProcessor& processor) override {
             const RGBToYUVEffect& effect = processor.cast<RGBToYUVEffect>();
             OutputChannels oc = effect.outputChannels();
             if (effect.getColorSpace() != fLastColorSpace || oc != fLastOutputChannels) {

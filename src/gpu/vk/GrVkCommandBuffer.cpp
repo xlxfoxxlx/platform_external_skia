@@ -18,10 +18,10 @@
 #include "SkRect.h"
 
 void GrVkCommandBuffer::invalidateState() {
-    fBoundVertexBuffer = VK_NULL_HANDLE;
-    fBoundVertexBufferIsValid = false;
+    for (auto& boundInputBuffer : fBoundInputBuffers) {
+        boundInputBuffer = VK_NULL_HANDLE;
+    }
     fBoundIndexBuffer = VK_NULL_HANDLE;
-    fBoundIndexBufferIsValid = false;
 
     memset(&fCachedViewport, 0, sizeof(VkViewport));
     fCachedViewport.width = - 1.0f; // Viewport must have a width greater than 0
@@ -50,7 +50,7 @@ void GrVkCommandBuffer::freeGPUData(const GrVkGpu* gpu) const {
     this->onFreeGPUData(gpu);
 }
 
-void GrVkCommandBuffer::abandonSubResources() const {
+void GrVkCommandBuffer::abandonGPUData() const {
     for (int i = 0; i < fTrackedResources.count(); ++i) {
         fTrackedResources[i]->unrefAndAbandon();
     }

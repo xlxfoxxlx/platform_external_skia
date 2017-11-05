@@ -38,6 +38,7 @@ public:
 protected:
     sk_sp<SkSpecialImage> onFilterImage(SkSpecialImage* source, const Context&,
                                         SkIPoint* offset) const override;
+    sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const override;
 
 #if SK_SUPPORT_GPU
     sk_sp<SkSpecialImage> filterImageGPU(SkSpecialImage* source,
@@ -187,6 +188,22 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter_Base::onFilterImage(SkSpecialImage* 
     return surf->makeImageSnapshot();
 }
 
+sk_sp<SkImageFilter> SkXfermodeImageFilter_Base::onMakeColorSpace(SkColorSpaceXformer* xformer)
+const {
+    SkASSERT(2 == this->countInputs());
+    if (!this->getInput(0) && !this->getInput(1)) {
+        return sk_ref_sp(const_cast<SkXfermodeImageFilter_Base*>(this));
+    }
+
+    sk_sp<SkImageFilter> background =
+            this->getInput(0) ? this->getInput(0)->makeColorSpace(xformer) : nullptr;
+    sk_sp<SkImageFilter> foreground =
+            this->getInput(1) ? this->getInput(1)->makeColorSpace(xformer) : nullptr;
+
+    return SkXfermodeImageFilter::Make(fMode, std::move(background), std::move(foreground),
+                                       this->getCropRectIfSet());
+}
+
 void SkXfermodeImageFilter_Base::drawForeground(SkCanvas* canvas, SkSpecialImage* img,
                                                 const SkIRect& fgBounds) const {
     SkPaint paint;
@@ -324,7 +341,6 @@ SkXfermodeImageFilter_Base::makeFGFrag(sk_sp<GrFragmentProcessor> bgFP) const {
         // have to get one the hard way.
         struct ProcCoeff rec;
         rec.fProc = SkXfermode::GetProc(SkBlendMode::kSrcOver);
-        SkXfermode::ModeAsCoeff(SkBlendMode::kSrcOver, &rec.fSC, &rec.fDC);
 
         srcover.reset(new SkProcCoeffXfermode(rec, SkBlendMode::kSrcOver));
         xfer = srcover.get();

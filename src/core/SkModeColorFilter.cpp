@@ -5,21 +5,22 @@
  * found in the LICENSE file.
  */
 
-#include "SkBlitRow.h"
+#include "SkArenaAlloc.h"
 #include "SkBlendModePriv.h"
+#include "SkBlitRow.h"
 #include "SkColorFilter.h"
 #include "SkColorPriv.h"
-#include "SkArenaAlloc.h"
+#include "SkColorSpaceXformer.h"
 #include "SkModeColorFilter.h"
+#include "SkPM4f.h"
 #include "SkPM4fPriv.h"
+#include "SkRandom.h"
 #include "SkRasterPipeline.h"
 #include "SkReadBuffer.h"
-#include "SkWriteBuffer.h"
-#include "SkUtils.h"
-#include "SkRandom.h"
 #include "SkString.h"
+#include "SkUtils.h"
 #include "SkValidationUtils.h"
-#include "SkPM4f.h"
+#include "SkWriteBuffer.h"
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -63,14 +64,6 @@ void SkModeColorFilter::filterSpan(const SkPMColor shader[], int count, SkPMColo
     }
 }
 
-void SkModeColorFilter::filterSpan4f(const SkPM4f shader[], int count, SkPM4f result[]) const {
-    SkXfermodeProc4f  proc = SkXfermode::GetProc4f(fMode);
-    auto pm4f = SkColor4f::FromColor(fColor).premul();
-    for (int i = 0; i < count; i++) {
-        result[i] = proc(pm4f, shader[i]);
-    }
-}
-
 void SkModeColorFilter::flatten(SkWriteBuffer& buffer) const {
     buffer.writeColor(fColor);
     buffer.writeUInt((int)fMode);
@@ -79,6 +72,7 @@ void SkModeColorFilter::flatten(SkWriteBuffer& buffer) const {
 void SkModeColorFilter::updateCache() {
     fPMColor = SkPreMultiplyColor(fColor);
     fProc = SkXfermode::GetProc(fMode);
+    fPMColor4f = SkColor4f::FromColor(fColor).premul();
 }
 
 sk_sp<SkFlattenable> SkModeColorFilter::CreateProc(SkReadBuffer& buffer) {
@@ -87,7 +81,7 @@ sk_sp<SkFlattenable> SkModeColorFilter::CreateProc(SkReadBuffer& buffer) {
     return SkColorFilter::MakeModeFilter(color, mode);
 }
 
-bool SkModeColorFilter::onAppendStages(SkRasterPipeline* p,
+void SkModeColorFilter::onAppendStages(SkRasterPipeline* p,
                                        SkColorSpace* dst,
                                        SkArenaAlloc* scratch,
                                        bool shaderIsOpaque) const {
@@ -96,11 +90,14 @@ bool SkModeColorFilter::onAppendStages(SkRasterPipeline* p,
     p->append(SkRasterPipeline::move_src_dst);
     p->append(SkRasterPipeline::constant_color, color);
     auto mode = (SkBlendMode)fMode;
-    if (!SkBlendMode_AppendStages(mode, p)) {
-        return false;
+    SkBlendMode_AppendStages(mode, p);
+    if (SkBlendMode_CanOverflow(mode)) {
+        p->append(SkRasterPipeline::clamp_a);
     }
-    if (SkBlendMode_CanOverflow(mode)) { p->append(SkRasterPipeline::clamp_a); }
-    return true;
+}
+
+sk_sp<SkColorFilter> SkModeColorFilter::onMakeColorSpace(SkColorSpaceXformer* xformer) const {
+    return SkColorFilter::MakeModeFilter(xformer->apply(fColor), fMode);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -30,9 +30,10 @@ public:
 
     const char* name() const override { return "BezierCubicOrConicTestOp"; }
 
-    static std::unique_ptr<GrMeshDrawOp> Make(sk_sp<GrGeometryProcessor> gp, const SkRect& rect,
-                                              GrColor color, const SkMatrix& klm, SkScalar sign) {
-        return std::unique_ptr<GrMeshDrawOp>(
+    static std::unique_ptr<GrLegacyMeshDrawOp> Make(sk_sp<GrGeometryProcessor> gp,
+                                                    const SkRect& rect, GrColor color,
+                                                    const SkMatrix& klm, SkScalar sign) {
+        return std::unique_ptr<GrLegacyMeshDrawOp>(
                 new BezierCubicOrConicTestOp(gp, rect, color, klm, sign));
     }
 
@@ -66,7 +67,7 @@ private:
             SkScalar pt3[3] = {verts[v].fPosition.x(), verts[v].fPosition.y(), 1.f};
             fKLM.mapHomogeneousPoints(verts[v].fKLM, pt3, 1);
         }
-        helper.recordDraw(target, fGeometryProcessor.get());
+        helper.recordDraw(target, fGeometryProcessor.get(), this->pipeline());
     }
 
     SkMatrix fKLM;
@@ -159,9 +160,9 @@ protected:
 
                 SkPaint ctrlPtPaint;
                 ctrlPtPaint.setColor(rand.nextU() | 0xFF000000);
-                canvas->drawCircle(controlPts[0].fX, controlPts[0].fY, 8.f, ctrlPtPaint);
+                canvas->drawCircle(controlPts[0], 8.f, ctrlPtPaint);
                 for (int i = 1; i < 4; ++i) {
-                    canvas->drawCircle(controlPts[i].fX, controlPts[i].fY, 6.f, ctrlPtPaint);
+                    canvas->drawCircle(controlPts[i], 6.f, ctrlPtPaint);
                 }
 
                 SkPaint polyPaint;
@@ -177,7 +178,7 @@ protected:
                     SkPoint* pts = chopped + 3 * c;
 
                     for (int i = 0; i < 4; ++i) {
-                        canvas->drawCircle(pts[i].fX, pts[i].fY, 3.f, choppedPtPaint);
+                        canvas->drawCircle(pts[i], 3.f, choppedPtPaint);
                     }
 
                     SkRect bounds;
@@ -197,10 +198,10 @@ protected:
                         sign = -1.0f;
                     }
 
-                    std::unique_ptr<GrMeshDrawOp> op =
+                    std::unique_ptr<GrLegacyMeshDrawOp> op =
                             BezierCubicOrConicTestOp::Make(gp, bounds, color, klm, sign);
 
-                    renderTargetContext->priv().testingOnly_addMeshDrawOp(
+                    renderTargetContext->priv().testingOnly_addLegacyMeshDrawOp(
                             std::move(grPaint), GrAAType::kNone, std::move(op));
                 }
                 ++col;
@@ -298,7 +299,7 @@ protected:
                 SkPaint ctrlPtPaint;
                 ctrlPtPaint.setColor(rand.nextU() | 0xFF000000);
                 for (int i = 0; i < 3; ++i) {
-                    canvas->drawCircle(controlPts[i].fX, controlPts[i].fY, 6.f, ctrlPtPaint);
+                    canvas->drawCircle(controlPts[i], 6.f, ctrlPtPaint);
                 }
 
                 SkPaint polyPaint;
@@ -313,7 +314,7 @@ protected:
                 for (int c = 0; c < cnt; ++c) {
                     SkPoint* pts = dst[c].fPts;
                     for (int i = 0; i < 3; ++i) {
-                        canvas->drawCircle(pts[i].fX, pts[i].fY, 3.f, choppedPtPaint);
+                        canvas->drawCircle(pts[i], 3.f, choppedPtPaint);
                     }
 
                     SkRect bounds;
@@ -330,10 +331,10 @@ protected:
                     GrPaint grPaint;
                     grPaint.setXPFactory(GrPorterDuffXPFactory::Get(SkBlendMode::kSrc));
 
-                    std::unique_ptr<GrMeshDrawOp> op =
+                    std::unique_ptr<GrLegacyMeshDrawOp> op =
                             BezierCubicOrConicTestOp::Make(gp, bounds, color, klm, 1.f);
 
-                    renderTargetContext->priv().testingOnly_addMeshDrawOp(
+                    renderTargetContext->priv().testingOnly_addLegacyMeshDrawOp(
                             std::move(grPaint), GrAAType::kNone, std::move(op));
                 }
                 ++col;
@@ -396,10 +397,10 @@ public:
     DEFINE_OP_CLASS_ID
     const char* name() const override { return "BezierQuadTestOp"; }
 
-    static std::unique_ptr<GrMeshDrawOp> Make(sk_sp<GrGeometryProcessor> gp, const SkRect& rect,
-                                              GrColor color,
-                                              const GrPathUtils::QuadUVMatrix& devToUV) {
-        return std::unique_ptr<GrMeshDrawOp>(new BezierQuadTestOp(gp, rect, color, devToUV));
+    static std::unique_ptr<GrLegacyMeshDrawOp> Make(sk_sp<GrGeometryProcessor> gp,
+                                                    const SkRect& rect, GrColor color,
+                                                    const GrPathUtils::QuadUVMatrix& devToUV) {
+        return std::unique_ptr<GrLegacyMeshDrawOp>(new BezierQuadTestOp(gp, rect, color, devToUV));
     }
 
 private:
@@ -426,7 +427,7 @@ private:
         verts[0].fPosition.setRectFan(fRect.fLeft, fRect.fTop, fRect.fRight, fRect.fBottom,
                                       sizeof(Vertex));
         fDevToUV.apply<4, sizeof(Vertex), sizeof(SkPoint)>(verts);
-        helper.recordDraw(target, fGeometryProcessor.get());
+        helper.recordDraw(target, fGeometryProcessor.get(), this->pipeline());
     }
 
     GrPathUtils::QuadUVMatrix fDevToUV;
@@ -515,7 +516,7 @@ protected:
                 SkPaint ctrlPtPaint;
                 ctrlPtPaint.setColor(rand.nextU() | 0xFF000000);
                 for (int i = 0; i < 3; ++i) {
-                    canvas->drawCircle(controlPts[i].fX, controlPts[i].fY, 6.f, ctrlPtPaint);
+                    canvas->drawCircle(controlPts[i], 6.f, ctrlPtPaint);
                 }
 
                 SkPaint polyPaint;
@@ -531,7 +532,7 @@ protected:
                     SkPoint* pts = chopped + 2 * c;
 
                     for (int i = 0; i < 3; ++i) {
-                        canvas->drawCircle(pts[i].fX, pts[i].fY, 3.f, choppedPtPaint);
+                        canvas->drawCircle(pts[i], 3.f, choppedPtPaint);
                     }
 
                     SkRect bounds;
@@ -548,10 +549,10 @@ protected:
 
                     GrPathUtils::QuadUVMatrix DevToUV(pts);
 
-                    std::unique_ptr<GrMeshDrawOp> op =
+                    std::unique_ptr<GrLegacyMeshDrawOp> op =
                             BezierQuadTestOp::Make(gp, bounds, color, DevToUV);
 
-                    renderTargetContext->priv().testingOnly_addMeshDrawOp(
+                    renderTargetContext->priv().testingOnly_addLegacyMeshDrawOp(
                             std::move(grPaint), GrAAType::kNone, std::move(op));
                 }
                 ++col;

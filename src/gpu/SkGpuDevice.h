@@ -92,6 +92,7 @@ public:
     void drawTextBlob(const SkTextBlob*, SkScalar x, SkScalar y,
                       const SkPaint& paint, SkDrawFilter* drawFilter) override;
     void drawVertices(const SkVertices*, SkBlendMode, const SkPaint&) override;
+    void drawShadow(const SkPath&, const SkDrawShadowRec&) override;
     void drawAtlas(const SkImage* atlas, const SkRSXform[], const SkRect[],
                    const SkColor[], int count, SkBlendMode, const SkPaint&) override;
     void drawDevice(SkBaseDevice*, int x, int y, const SkPaint&) override;
@@ -110,8 +111,8 @@ public:
     void drawBitmapLattice(const SkBitmap&, const SkCanvas::Lattice&,
                            const SkRect& dst, const SkPaint&) override;
 
-    void drawSpecial(SkSpecialImage*,
-                     int left, int top, const SkPaint& paint) override;
+    void drawSpecial(SkSpecialImage*, int left, int top, const SkPaint& paint,
+                     SkImage*, const SkMatrix&) override;
     sk_sp<SkSpecialImage> makeSpecial(const SkBitmap&) override;
     sk_sp<SkSpecialImage> makeSpecial(const SkImage*) override;
     sk_sp<SkSpecialImage> snapSpecial() override;
@@ -230,7 +231,7 @@ private:
     bool drawDashLine(const SkPoint pts[2], const SkPaint& paint);
     void drawStrokedLine(const SkPoint pts[2], const SkPaint&);
 
-    void wireframeVertices(SkCanvas::VertexMode, int vertexCount, const SkPoint verts[],
+    void wireframeVertices(SkVertices::VertexMode, int vertexCount, const SkPoint verts[],
                            SkBlendMode, const uint16_t indices[], int indexCount, const SkPaint&);
 
     static sk_sp<GrRenderTargetContext> MakeRenderTargetContext(GrContext*,

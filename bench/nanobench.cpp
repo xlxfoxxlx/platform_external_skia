@@ -50,6 +50,8 @@
 
 #include <stdlib.h>
 
+extern bool gSkForceRasterPipelineBlitter;
+
 #ifndef SK_BUILD_FOR_WIN32
     #include <unistd.h>
 #endif
@@ -128,6 +130,8 @@ DEFINE_string(sourceType, "",
 DEFINE_string(benchType,  "",
         "Apply usual --match rules to bench type: micro, recording, piping, playback, skcodec, etc.");
 
+DEFINE_bool(forceRasterPipeline, false, "sets gSkForceRasterPipelineBlitter");
+
 #if SK_SUPPORT_GPU
 DEFINE_pathrenderer_flag;
 #endif
@@ -154,8 +158,8 @@ bool Target::capturePixels(SkBitmap* bmp) {
     if (!canvas) {
         return false;
     }
-    bmp->setInfo(canvas->imageInfo());
-    if (!canvas->readPixels(bmp, 0, 0)) {
+    bmp->allocPixels(canvas->imageInfo());
+    if (!canvas->readPixels(*bmp, 0, 0)) {
         SkDebugf("Can't read canvas pixels.\n");
         return false;
     }
@@ -1195,6 +1199,9 @@ int main(int argc, char** argv) {
 
     if (FLAGS_forceAnalyticAA) {
         gSkForceAnalyticAA = true;
+    }
+    if (FLAGS_forceRasterPipeline) {
+        gSkForceRasterPipelineBlitter = true;
     }
 
     int runs = 0;

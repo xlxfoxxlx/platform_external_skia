@@ -305,10 +305,13 @@ GrGLSLFragmentProcessor* GrTextureDomainEffect::onCreateGLSLInstance() const  {
         }
 
     protected:
-        void onSetData(const GrGLSLProgramDataManager& pdman, const GrProcessor& fp) override {
+        void onSetData(const GrGLSLProgramDataManager& pdman,
+                       const GrFragmentProcessor& fp) override {
             const GrTextureDomainEffect& tde = fp.cast<GrTextureDomainEffect>();
             const GrTextureDomain& domain = tde.fTextureDomain;
-            fGLDomain.setData(pdman, domain, tde.textureSampler(0).texture());
+            GrTexture* texture =  tde.textureSampler(0).peekTexture();
+
+            fGLDomain.setData(pdman, domain, texture);
             if (SkToBool(tde.colorSpaceXform())) {
                 fColorSpaceHelper.setData(pdman, tde.colorSpaceXform());
             }
@@ -407,10 +410,12 @@ GrGLSLFragmentProcessor* GrDeviceSpaceTextureDecalFragmentProcessor::onCreateGLS
         }
 
     protected:
-        void onSetData(const GrGLSLProgramDataManager& pdman, const GrProcessor& fp) override {
+        void onSetData(const GrGLSLProgramDataManager& pdman,
+                       const GrFragmentProcessor& fp) override {
             const GrDeviceSpaceTextureDecalFragmentProcessor& dstdfp =
                     fp.cast<GrDeviceSpaceTextureDecalFragmentProcessor>();
-            GrTexture* texture = dstdfp.textureSampler(0).texture();
+            GrTexture* texture = dstdfp.textureSampler(0).peekTexture();
+
             fGLDomain.setData(pdman, dstdfp.fTextureDomain, texture);
             float iw = 1.f / texture->width();
             float ih = 1.f / texture->height();
@@ -436,7 +441,7 @@ GrGLSLFragmentProcessor* GrDeviceSpaceTextureDecalFragmentProcessor::onCreateGLS
 bool GrDeviceSpaceTextureDecalFragmentProcessor::onIsEqual(const GrFragmentProcessor& fp) const {
     const GrDeviceSpaceTextureDecalFragmentProcessor& dstdfp =
             fp.cast<GrDeviceSpaceTextureDecalFragmentProcessor>();
-    return dstdfp.fTextureSampler.texture() == fTextureSampler.texture() &&
+    return dstdfp.fTextureSampler.proxy() == fTextureSampler.proxy() &&
            dstdfp.fDeviceSpaceOffset == fDeviceSpaceOffset &&
            dstdfp.fTextureDomain == fTextureDomain;
 }

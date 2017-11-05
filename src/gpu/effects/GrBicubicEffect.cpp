@@ -27,7 +27,7 @@ public:
     }
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     typedef GrGLSLProgramDataManager::UniformHandle UniformHandle;
@@ -112,15 +112,15 @@ void GrGLBicubicEffect::emitCode(EmitArgs& args) {
         fragBuilder->appendColorGamutXform(&xformedColor, bicubicColor.c_str(), &fColorSpaceHelper);
         bicubicColor.swap(xformedColor);
     }
-    fragBuilder->codeAppendf("%s = %s;",
-                             args.fOutputColor, (GrGLSLExpr4(bicubicColor.c_str()) *
-                                                 GrGLSLExpr4(args.fInputColor)).c_str());
+    fragBuilder->codeAppendf("%s = %s * %s;", args.fOutputColor, bicubicColor.c_str(),
+                             args.fInputColor);
 }
 
 void GrGLBicubicEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                  const GrProcessor& processor) {
+                                  const GrFragmentProcessor& processor) {
     const GrBicubicEffect& bicubicEffect = processor.cast<GrBicubicEffect>();
-    GrTexture* texture = processor.textureSampler(0).texture();
+    GrTexture* texture = processor.textureSampler(0).peekTexture();
+
     float imageIncrement[2];
     imageIncrement[0] = 1.0f / texture->width();
     imageIncrement[1] = 1.0f / texture->height();

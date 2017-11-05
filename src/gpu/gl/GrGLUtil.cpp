@@ -313,8 +313,26 @@ GrGLRenderer GrGLGetRendererFromString(const char* rendererString) {
                 }
             }
         }
+        int intelNumber;
+        n = sscanf(rendererString, "Intel(R) Iris(TM) Graphics %d", &intelNumber);
+        if (1 != n) {
+            n = sscanf(rendererString, "Intel(R) HD Graphics %d", &intelNumber);
+        }
+        if (1 == n) {
+            if (intelNumber >= 6000 && intelNumber < 7000) {
+                return kIntel6xxx_GrGLRenderer;
+            }
+        }
         if (0 == strcmp("Mesa Offscreen", rendererString)) {
             return kOSMesa_GrGLRenderer;
+        }
+        static const char kMaliTStr[] = "Mali-T";
+        if (0 == strncmp(rendererString, kMaliTStr, SK_ARRAY_COUNT(kMaliTStr) - 1)) {
+            return kMaliT_GrGLRenderer;
+        }
+        static const char kANGLEStr[] = "ANGLE";
+        if (0 == strncmp(rendererString, kANGLEStr, SK_ARRAY_COUNT(kANGLEStr) - 1)) {
+            return kANGLE_GrGLRenderer;
         }
     }
     return kOther_GrGLRenderer;

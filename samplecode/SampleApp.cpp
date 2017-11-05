@@ -35,6 +35,7 @@
 #include "sk_tool_utils.h"
 #include "SkScan.h"
 #include "SkClipOpPriv.h"
+#include "SkThreadedBMPDevice.h"
 
 #include "SkReadBuffer.h"
 #include "SkStream.h"
@@ -382,6 +383,7 @@ public:
     }
 
     void windowSizeChanged(SampleWindow* win) override {
+        win->resetFPS();
 #if SK_SUPPORT_GPU
         if (fCurContext) {
             AttachmentInfo attachmentInfo;
@@ -1063,7 +1065,7 @@ void SampleWindow::listTitles() {
 static SkBitmap capture_bitmap(SkCanvas* canvas) {
     SkBitmap bm;
     if (bm.tryAllocPixels(canvas->imageInfo())) {
-        canvas->readPixels(&bm, 0, 0);
+        canvas->readPixels(bm, 0, 0);
     }
     return bm;
 }
@@ -1090,6 +1092,14 @@ static void drawText(SkCanvas* canvas, SkString str, SkScalar left, SkScalar top
 #include "SkDumpCanvas.h"
 
 void SampleWindow::draw(SkCanvas* canvas) {
+    std::unique_ptr<SkThreadedBMPDevice> tDev;
+    std::unique_ptr<SkCanvas> tCanvas;
+    if (fTiles > 0 && fDeviceType == kRaster_DeviceType) {
+        tDev.reset(new SkThreadedBMPDevice(this->getBitmap(), fTiles, fThreads));
+        tCanvas.reset(new SkCanvas(tDev.get()));
+        canvas = tCanvas.get();
+    }
+
     gAnimTimer.updateTime();
 
     if (fGesture.isActive()) {
@@ -1152,6 +1162,8 @@ void SampleWindow::draw(SkCanvas* canvas) {
     if (this->sendAnimatePulse() || FLAGS_redraw) {
         this->inval(nullptr);
     }
+
+    canvas->flush();
 
     // do this last
     fDevManager->publishCanvas(fDeviceType, canvas, this);
@@ -1271,7 +1283,6 @@ void SampleWindow::showZoomer(SkCanvas* canvas) {
     else if (fMouseY < 0) fMouseY = 0;
 
     SkBitmap bitmap = capture_bitmap(canvas);
-    bitmap.lockPixels();
 
     // Find the size of the zoomed in view, forced to be odd, so the examined pixel is in the middle.
     int zoomedWidth = (width >> 1) | 1;
@@ -1470,6 +1481,8 @@ void SampleWindow::afterChildren(SkCanvas* orig) {
         orig->flush();
         fTimer.end();
         fMeasureFPS_Time += fTimer.fWall;
+        fCumulativeFPS_Time += fTimer.fWall;
+        fCumulativeFPS_Count += FPS_REPEAT_COUNT;
     }
 }
 
@@ -1572,6 +1585,7 @@ void SampleWindow::updateMatrix(){
     this->inval(nullptr);
 }
 bool SampleWindow::previousSample() {
+    this->resetFPS();
     fCurrIndex = (fCurrIndex - 1 + fSamples.count()) % fSamples.count();
     this->loadView((*fSamples[fCurrIndex])());
     return true;
@@ -1580,6 +1594,7 @@ bool SampleWindow::previousSample() {
 #include "SkResourceCache.h"
 #include "SkGlyphCache.h"
 bool SampleWindow::nextSample() {
+    this->resetFPS();
     fCurrIndex = (fCurrIndex + 1) % fSamples.count();
     this->loadView((*fSamples[fCurrIndex])());
 
@@ -1593,6 +1608,7 @@ bool SampleWindow::nextSample() {
 }
 
 bool SampleWindow::goToSample(int i) {
+    this->resetFPS();
     fCurrIndex = (i) % fSamples.count();
     this->loadView((*fSamples[fCurrIndex])());
     return true;
@@ -1843,11 +1859,34 @@ bool SampleWindow::onHandleChar(SkUnichar uni) {
                 this->inval(nullptr);
             }
             break;
+        case '+':
+            gSampleWindow->setTiles(gSampleWindow->getTiles() + 1);
+            this->inval(nullptr);
+            this->updateTitle();
+            break;
+        case '-':
+            gSampleWindow->setTiles(SkTMax(0, gSampleWindow->getTiles() - 1));
+            this->inval(nullptr);
+            this->updateTitle();
+            break;
+        case '>':
+            gSampleWindow->setThreads(gSampleWindow->getThreads() + 1);
+            this->inval(nullptr);
+            this->updateTitle();
+            break;
+        case '<':
+            gSampleWindow->setThreads(SkTMax(0, gSampleWindow->getThreads() - 1));
+            this->inval(nullptr);
+            this->updateTitle();
+            break;
         case ' ':
             gAnimTimer.togglePauseResume();
             if (this->sendAnimatePulse()) {
                 this->inval(nullptr);
             }
+            break;
+        case '0':
+            this->resetFPS();
             break;
         case 'A':
             if (gSkUseAnalyticAA.load() && !gSkForceAnalyticAA.load()) {
@@ -1979,6 +2018,11 @@ void SampleWindow::toggleFPS() {
     fMeasureFPS = !fMeasureFPS;
     this->updateTitle();
     this->inval(nullptr);
+}
+
+void SampleWindow::resetFPS() {
+    fCumulativeFPS_Time = 0;
+    fCumulativeFPS_Count = 0;
 }
 
 void SampleWindow::toggleDistanceFieldFonts() {
@@ -2208,6 +2252,10 @@ void SampleWindow::updateTitle() {
 
     title.prepend(gDeviceTypePrefix[fDeviceType]);
 
+    if (gSampleWindow->getTiles()) {
+        title.prependf("[T%d/%d] ", gSampleWindow->getTiles(), gSampleWindow->getThreads());
+    }
+
     if (gSkUseAnalyticAA) {
         if (gSkForceAnalyticAA) {
             title.prepend("<FAAA> ");
@@ -2255,6 +2303,7 @@ void SampleWindow::updateTitle() {
 
     if (fMeasureFPS) {
         title.appendf(" %8.4f ms", fMeasureFPS_Time / (float)FPS_REPEAT_COUNT);
+        title.appendf(" -> %4.4f ms", fCumulativeFPS_Time / (float)SkTMax(1, fCumulativeFPS_Count));
     }
 
 #if SK_SUPPORT_GPU

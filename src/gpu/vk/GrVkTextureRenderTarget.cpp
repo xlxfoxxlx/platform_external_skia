@@ -18,11 +18,11 @@
 
 #define VK_CALL(GPU, X) GR_VK_CALL(GPU->vkInterface(), X)
 
-GrVkTextureRenderTarget* GrVkTextureRenderTarget::Create(GrVkGpu* gpu,
-                                                         const GrSurfaceDesc& desc,
-                                                         const GrVkImageInfo& info,
-                                                         SkBudgeted budgeted,
-                                                         GrVkImage::Wrapped wrapped) {
+sk_sp<GrVkTextureRenderTarget> GrVkTextureRenderTarget::Make(GrVkGpu* gpu,
+                                                             const GrSurfaceDesc& desc,
+                                                             const GrVkImageInfo& info,
+                                                             SkBudgeted budgeted,
+                                                             GrVkImage::Wrapped wrapped) {
     VkImage image = info.fImage;
     // Create the texture ImageView
     const GrVkImageView* imageView = GrVkImageView::Create(gpu, image, info.fFormat,
@@ -87,34 +87,38 @@ GrVkTextureRenderTarget* GrVkTextureRenderTarget::Create(GrVkGpu* gpu,
         return nullptr;
     }
 
-    GrVkTextureRenderTarget* texRT;
+    sk_sp<GrVkTextureRenderTarget> texRT;
     if (desc.fSampleCnt) {
         if (GrVkImage::kNot_Wrapped == wrapped) {
-            texRT = new GrVkTextureRenderTarget(gpu, budgeted, desc,
-                                                info, imageView, msInfo,
-                                                colorAttachmentView,
-                                                resolveAttachmentView);
+            texRT = sk_sp<GrVkTextureRenderTarget>(new GrVkTextureRenderTarget(
+                                                      gpu, budgeted, desc,
+                                                      info, imageView, msInfo,
+                                                      colorAttachmentView,
+                                                      resolveAttachmentView));
         } else {
-            texRT = new GrVkTextureRenderTarget(gpu, desc,
-                                                info, imageView, msInfo,
-                                                colorAttachmentView,
-                                                resolveAttachmentView, wrapped);
+            texRT = sk_sp<GrVkTextureRenderTarget>(new GrVkTextureRenderTarget(
+                                                        gpu, desc,
+                                                        info, imageView, msInfo,
+                                                        colorAttachmentView,
+                                                        resolveAttachmentView, wrapped));
         }
     } else {
         if (GrVkImage::kNot_Wrapped == wrapped) {
-            texRT = new GrVkTextureRenderTarget(gpu, budgeted, desc,
-                                                info, imageView,
-                                                colorAttachmentView);
+            texRT = sk_sp<GrVkTextureRenderTarget>(new GrVkTextureRenderTarget(
+                                                        gpu, budgeted, desc,
+                                                        info, imageView,
+                                                        colorAttachmentView));
         } else {
-            texRT = new GrVkTextureRenderTarget(gpu, desc,
-                                                info, imageView,
-                                                colorAttachmentView, wrapped);
+            texRT = sk_sp<GrVkTextureRenderTarget>(new GrVkTextureRenderTarget(
+                                                        gpu, desc,
+                                                        info, imageView,
+                                                        colorAttachmentView, wrapped));
         }
     }
     return texRT;
 }
 
-GrVkTextureRenderTarget*
+sk_sp<GrVkTextureRenderTarget>
 GrVkTextureRenderTarget::CreateNewTextureRenderTarget(GrVkGpu* gpu,
                                                       SkBudgeted budgeted,
                                                       const GrSurfaceDesc& desc,
@@ -127,7 +131,7 @@ GrVkTextureRenderTarget::CreateNewTextureRenderTarget(GrVkGpu* gpu,
         return nullptr;
     }
 
-    GrVkTextureRenderTarget* trt = Create(gpu, desc, info, budgeted, GrVkImage::kNot_Wrapped);
+    sk_sp<GrVkTextureRenderTarget> trt = Make(gpu, desc, info, budgeted, GrVkImage::kNot_Wrapped);
     if (!trt) {
         GrVkImage::DestroyImageInfo(gpu, &info);
     }
@@ -143,18 +147,17 @@ GrVkTextureRenderTarget::MakeWrappedTextureRenderTarget(GrVkGpu* gpu,
     SkASSERT(info);
     // Wrapped textures require both image and allocation (because they can be mapped)
     SkASSERT(VK_NULL_HANDLE != info->fImage && VK_NULL_HANDLE != info->fAlloc.fMemory);
-    SkASSERT(kAdoptAndCache_GrWrapOwnership != ownership);  // Not supported
 
     GrVkImage::Wrapped wrapped = kBorrow_GrWrapOwnership == ownership ? GrVkImage::kBorrowed_Wrapped
                                                                       : GrVkImage::kAdopted_Wrapped;
 
-    return sk_sp<GrVkTextureRenderTarget>(Create(gpu, desc, *info, SkBudgeted::kNo, wrapped));
+    return Make(gpu, desc, *info, SkBudgeted::kNo, wrapped);
 }
 
 bool GrVkTextureRenderTarget::updateForMipmap(GrVkGpu* gpu, const GrVkImageInfo& newInfo) {
     VkFormat pixelFormat;
-    GrPixelConfigToVkFormat(fDesc.fConfig, &pixelFormat);
-    if (fDesc.fSampleCnt) {
+    GrPixelConfigToVkFormat(this->config(), &pixelFormat);
+    if (this->numStencilSamples()) {
         const GrVkImageView* resolveAttachmentView =
                 GrVkImageView::Create(gpu,
                                       newInfo.fImage,

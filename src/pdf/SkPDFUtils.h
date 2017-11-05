@@ -11,6 +11,7 @@
 
 #include "SkPaint.h"
 #include "SkPath.h"
+#include "SkShader.h"
 #include "SkStream.h"
 #include "SkUtils.h"
 
@@ -101,6 +102,23 @@ inline void WriteUTF16beHex(SkDynamicMemoryWStream* wStream, SkUnichar utf32) {
     if (len == 2) {
         SkPDFUtils::WriteUInt16BE(wStream, utf16[1]);
     }
+}
+
+template <class T>
+static sk_sp<T> GetCachedT(sk_sp<T>* cachedT, sk_sp<T> (*makeNewT)()) {
+    if (*cachedT) {
+        return *cachedT;
+    }
+    *cachedT = (*makeNewT)();
+    return *cachedT;
+}
+
+inline SkMatrix GetShaderLocalMatrix(const SkShader* shader) {
+    SkMatrix localMatrix;
+    if (sk_sp<SkShader> s = shader->makeAsALocalMatrixShader(&localMatrix)) {
+        return SkMatrix::Concat(s->getLocalMatrix(), localMatrix);
+    }
+    return shader->getLocalMatrix();
 }
 }  // namespace SkPDFUtils
 

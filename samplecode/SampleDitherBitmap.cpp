@@ -13,6 +13,7 @@
 #include "SkRegion.h"
 #include "SkUtils.h"
 #include "SkView.h"
+#include "sk_tool_utils.h"
 
 static void draw_rect(SkCanvas* canvas, const SkRect& r, const SkPaint& p) {
     canvas->drawRect(r, p);
@@ -56,21 +57,16 @@ static SkBitmap make_bitmap() {
     for (int i = 0; i < 256; i++) {
         c[i] = SkPackARGB32(0xFF, i, 0, 0);
     }
-    SkColorTable* ctable = new SkColorTable(c, 256);
-
     SkBitmap bm;
     bm.allocPixels(SkImageInfo::Make(256, 32, kIndex_8_SkColorType, kPremul_SkAlphaType),
-                   nullptr, ctable);
-    ctable->unref();
+                   SkColorTable::Make(c, 256));
 
-    bm.lockPixels();
     for (int y = 0; y < bm.height(); y++) {
         uint8_t* p = bm.getAddr8(0, y);
         for (int x = 0; x < 256; x++) {
             p[x] = x;
         }
     }
-    bm.unlockPixels();
     return bm;
 }
 
@@ -82,7 +78,7 @@ public:
     DitherBitmapView() {
         fResult = test_pathregion();
         fBM8 = make_bitmap();
-        fBM8.copyTo(&fBM32, kN32_SkColorType);
+        sk_tool_utils::copy_to(&fBM32, kN32_SkColorType, fBM8);
 
         this->setBGColor(0xFFDDDDDD);
     }
@@ -98,7 +94,6 @@ protected:
     }
 
     static void setBitmapOpaque(SkBitmap* bm, bool isOpaque) {
-        SkAutoLockPixels alp(*bm);  // needed for ctable
         bm->setAlphaType(isOpaque ? kOpaque_SkAlphaType : kPremul_SkAlphaType);
     }
 

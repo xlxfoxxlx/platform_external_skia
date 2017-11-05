@@ -11,16 +11,12 @@
 #include "SkNx.h"
 #include "SkTypes.h"
 
-#if !defined(_MSC_VER) && SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
-    #include <x86intrin.h>
-#endif
-
 // 16-bit floating point value
 // format is 1 bit sign, 5 bits exponent, 10 bits mantissa
 // only used for storage
 typedef uint16_t SkHalf;
 
-static constexpr uint16_t SK_HalfMin     = 0x0400; // 2^-24  (minimum positive normal value)
+static constexpr uint16_t SK_HalfMin     = 0x0400; // 2^-14  (minimum positive normal value)
 static constexpr uint16_t SK_HalfMax     = 0x7bff; // 65504
 static constexpr uint16_t SK_HalfEpsilon = 0x1400; // 2^-10
 static constexpr uint16_t SK_Half1       = 0x3C00; // 1
@@ -86,31 +82,6 @@ static inline Sk4h SkFloatToHalf_finite_ftz(const Sk4f& fs) {
 
     Sk4i merged = (sign >> 16) | (will_be_norm & norm);
     return SkNx_cast<uint16_t>(merged);
-#endif
-}
-
-static inline Sk8f SkHalfToFloat_finite_ftz(const Sk8h& hs) {
-#if !defined(SKNX_NO_SIMD) && SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
-    return _mm256_cvtph_ps(hs.fVec);
-
-#else
-    uint64_t parts[2];
-    hs.store(parts);
-    return SkNx_join(SkHalfToFloat_finite_ftz(parts[0]),
-                     SkHalfToFloat_finite_ftz(parts[1]));
-
-#endif
-}
-
-static inline Sk8h SkFloatToHalf_finite_ftz(const Sk8f& fs) {
-#if !defined(SKNX_NO_SIMD) && SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
-    return _mm256_cvtps_ph(fs.fVec, _MM_FROUND_CUR_DIRECTION);
-
-#else
-    uint64_t parts[2];
-    SkFloatToHalf_finite_ftz(fs.fLo).store(parts+0);
-    SkFloatToHalf_finite_ftz(fs.fHi).store(parts+1);
-    return Sk8h::Load(parts);
 #endif
 }
 

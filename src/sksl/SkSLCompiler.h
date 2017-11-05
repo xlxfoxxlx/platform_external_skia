@@ -4,11 +4,12 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_COMPILER
 #define SKSL_COMPILER
 
 #include <set>
+#include <unordered_set>
 #include <vector>
 #include "ir/SkSLProgram.h"
 #include "ir/SkSLSymbolTable.h"
@@ -42,20 +43,20 @@ public:
 
     ~Compiler() override;
 
-    std::unique_ptr<Program> convertProgram(Program::Kind kind, SkString text,
+    std::unique_ptr<Program> convertProgram(Program::Kind kind, String text,
                                             const Program::Settings& settings);
 
-    bool toSPIRV(const Program& program, SkWStream& out);
+    bool toSPIRV(const Program& program, OutputStream& out);
 
-    bool toSPIRV(const Program& program, SkString* out);
+    bool toSPIRV(const Program& program, String* out);
 
-    bool toGLSL(const Program& program, SkWStream& out);
+    bool toGLSL(const Program& program, OutputStream& out);
 
-    bool toGLSL(const Program& program, SkString* out);
+    bool toGLSL(const Program& program, String* out);
 
-    void error(Position position, SkString msg) override;
+    void error(Position position, String msg) override;
 
-    SkString errorText();
+    String errorText();
 
     void writeErrorCount();
 
@@ -71,19 +72,43 @@ private:
 
     void scanCFG(CFG* cfg, BlockId block, std::set<BlockId>* workList);
 
-    void scanCFG(const FunctionDefinition& f);
+    void computeDataFlow(CFG* cfg);
 
-    void internalConvertProgram(SkString text,
+    /**
+     * Simplifies the expression pointed to by iter (in both the IR and CFG structures), if
+     * possible.
+     */
+    void simplifyExpression(DefinitionMap& definitions,
+                            BasicBlock& b,
+                            std::vector<BasicBlock::Node>::iterator* iter,
+                            std::unordered_set<const Variable*>* undefinedVariables,
+                            bool* outUpdated,
+                            bool* outNeedsRescan);
+
+    /**
+     * Simplifies the statement pointed to by iter (in both the IR and CFG structures), if
+     * possible.
+     */
+    void simplifyStatement(DefinitionMap& definitions,
+                           BasicBlock& b,
+                           std::vector<BasicBlock::Node>::iterator* iter,
+                           std::unordered_set<const Variable*>* undefinedVariables,
+                           bool* outUpdated,
+                           bool* outNeedsRescan);
+
+    void scanCFG(FunctionDefinition& f);
+
+    void internalConvertProgram(String text,
                                 Modifiers::Flag* defaultPrecision,
                                 std::vector<std::unique_ptr<ProgramElement>>* result);
 
     std::shared_ptr<SymbolTable> fTypes;
     IRGenerator* fIRGenerator;
-    SkString fSkiaVertText; // FIXME store parsed version instead
+    String fSkiaVertText; // FIXME store parsed version instead
 
     Context fContext;
     int fErrorCount;
-    SkString fErrorText;
+    String fErrorText;
 };
 
 } // namespace
